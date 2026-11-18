@@ -71,6 +71,7 @@ nav.tabs button .badge{background:var(--brass);color:#fff;border-radius:999px;fo
 
 main{padding:18px 0 40px}
 .grid{display:grid;gap:16px}
+.grid>*{min-width:0}
 .g2{grid-template-columns:minmax(0,1.6fr) minmax(0,1fr)}
 .g2e{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
 .g3{grid-template-columns:repeat(3,minmax(0,1fr))}
@@ -381,6 +382,51 @@ const DEFAULT_CONFIG={
  deliverMin:2, deliverMax:4,
 };
 
+/* ---------- ROUND 2: tide pool, cartridges, flavors, pens ---------- */
+const PEN_TIERS={
+ simple:{label:"Simple",price:6,rp:2,time:15,life:60,xp:2},
+ luxury:{label:"Luxury",price:30,rp:3,time:30,life:180,xp:3},
+ decorative:{label:"Decorative",price:90,rp:4,time:45,life:365,xp:4}};
+const TIER_KEYS=["simple","luxury","decorative"];
+const PART_KINDS={body:"Body",mouth:"Mouthpiece",band:"Band"};
+const PART_DESIGNS={
+ body:{simple:["Brass","Steel","Sealed driftwood","Resin"],luxury:["Silver","Gold","Ebony","Mother-of-pearl"],decorative:["Enamel","Carved bone","Gem-set metal"]},
+ mouth:{simple:["Plain"],luxury:["Polished","Engraved"],decorative:["Whale tail","Wave crest"]},
+ band:{luxury:["Engraved band"],decorative:["Inlaid gems","Inlaid pearls"]}};
+const PART_PRICE={body:{simple:1,luxury:5,decorative:15},mouth:{simple:.5,luxury:3,decorative:8},band:{luxury:1.5,decorative:6.5}};
+const CORE_PRICE=.5,SHELL_PRICE=.5,TOOLING_FEE=50;
+const START_TOOLED=["body:Brass","mouth:Plain"];
+const partKey=(kind,name)=>`${kind}:${name}`;
+const partTier=key=>{const [k,n]=key.split(":");if(!PART_DESIGNS[k])return null;for(const t of TIER_KEYS)if((PART_DESIGNS[k][t]||[]).includes(n))return t;return null};
+const partLabel=key=>{if(key==="shell")return "Cartridge shell";if(key==="core")return "Mana core";const [k,n]=key.split(":");return k==="band"?(/band$/.test(n)?n:`${n} band`):`${n} ${PART_KINDS[k].toLowerCase()}`};
+const partPrice=key=>{const [k]=key.split(":");return PART_PRICE[k][partTier(key)]};
+const BIN_LABEL=k=>JARS[k]?JARS[k].label+"s":k==="shell"?"Cartridge shells":k==="core"?"Mana cores":partLabel(k).replace(/body$/,"bodie")+"s";
+const FLAVORS=["Peach","Mango","Apple","Pear","Rose","Mint","Honey","Citrus","Vanilla","Sea Salt"];
+const HOUSE_BLEND="Ægir's Peach & Mango";
+const flavorDrops=f=>f===HOUSE_BLEND?{Peach:1,Mango:1}:f?{[f]:1}:{};
+const BOTTLES={small:{label:"Small dropper",drops:10,price:20},standard:{label:"Standard",drops:25,price:40},workshop:{label:"Workshop bottle",drops:60,price:80}};
+const FLAVOR_RACK=12;
+// what each faction orders, by product; pen tiers they favor; how often cartridges are flavored
+const PRODUCTS={
+ adv:{w:{jar:4,cart:3,pen:4},tiers:{simple:8,luxury:2},flav:.5},
+ arcane:{w:{jar:6,cart:3,pen:1},tiers:{simple:3,luxury:5,decorative:2},flav:.4},
+ sch:{w:{jar:3,cart:3,pen:4},tiers:{simple:9,luxury:1},flav:.4},
+ peers:{w:{jar:2,cart:2,pen:6},tiers:{luxury:5,decorative:5},flav:1},
+ reg:{w:{jar:3,cart:2,pen:4},tiers:{luxury:3,decorative:7},flav:.5},
+ accord:{w:{jar:6,cart:2,pen:2},tiers:{simple:9,luxury:1},flav:.3},
+ tides:{w:{jar:3,cart:3,pen:4},tiers:{simple:8,luxury:2},flav:.5},
+ hearth:{w:{jar:4,cart:2,pen:4},tiers:{simple:6,luxury:4},flav:.8,blend:3},
+ synod:{w:{jar:1,cart:0,pen:0},tiers:{},flav:0},
+};
+const PREF_MUTS={arcane:["Smooth"],accord:["Swift","Lingering"],tides:["Lingering"],synod:["Lingering","Fragrant"],peers:["Lustrous","Smooth"],reg:Object.keys(MUTATIONS)};
+const POOL_CAP=10,JEFF_PCT=40;
+Object.assign(EFFECT_TEXT,{
+ crossProgress:"+{v}% progress per cross toward Established",crossMut:"+{v}% mutation chance per cross",extractTime:"Extracting and filling a cartridge takes {v} min less",
+ penTime:"Pen assembly takes {v} min less",crossTime:"Crossing takes {v} min less",flavorDrops:"Flavor bottles hold +{v} drops",concentrate:"Cartridges need 2 buds instead of 3",
+ houseBlend:"Flavored cartridges +{v} Cr",loyalCustomers:"Refill chance +{v}% per pen in circulation",sharkSupervisor:"When Jeff naps by the tide pool, crosses get +1% mutation chance and +5% progress",
+});
+Object.assign(DEFAULT_CONFIG,{poolCap:POOL_CAP,jeffPct:JEFF_PCT,crossPct:20,refillPct:2,refillCap:3,refillUnlock:5,penLoss:.5,replacePct:30,extractMana:.5,addonPct:40});
+
 /* ================================================================
    HELPERS
    ================================================================ */
@@ -435,9 +481,11 @@ function newGame(startDN){
     location:"home", pos:null,
     xp:0, level:0, statPoints:0, stats:{insight:1,precision:1,renown:1},
     cards:{}, packs:[{kind:"starter",count:3}], lives:1, hull:100, wx:{}, towOwed:0,
-    codex:{found:{}}, est:{}, mutations:{}, sold:{}, mastery:{},
+    codex:{found:{},recipes:{}}, est:{}, mutations:{}, sold:{}, mastery:{},
     nodes:[], tank:[], racks:[[],[]], racksBought:0, humidor:[], loose:[],
-    bins:{small:10,jar:10,xl:2}, deliveries:[],
+    bins:{small:10,jar:10,xl:2,shell:20,core:50,"body:Brass":10,"mouth:Plain":10}, deliveries:[],
+    flavors:[{flavor:"Peach",drops:25},{flavor:"Mango",drops:25}], tooled:Object.fromEntries(START_TOOLED.map(k=>[k,0])),
+    pool:[], tankPlants:[], pens:[], pensSold:0,
     factions:Object.fromEntries(FACTIONS.map(f=>[f.key,{rp:0,level:0,registered:false,autoRenew:false}])),
     offers:[], orders:[], done:[],
     log:[], ledger:[], wledger:[], events:[],
@@ -456,9 +504,11 @@ function newGame(startDN){
 function migrate(s){
   s.config=Object.assign(deep(DEFAULT_CONFIG),s.config||{});
   for(const f of FACTIONS) if(!s.factions[f.key]) s.factions[f.key]={rp:0,level:0,registered:false,autoRenew:false};
-  for(const k of ["nodes","tank","humidor","loose","deliveries","offers","orders","done","log","ledger","wledger","events","packs"]) s[k]=s[k]||[];
+  for(const k of ["nodes","tank","humidor","loose","deliveries","offers","orders","done","log","ledger","wledger","events","packs","flavors","pool","tankPlants","pens"]) s[k]=s[k]||[];
+  if(!s.tooled)s.tooled=Object.fromEntries(START_TOOLED.map(k=>[k,0]));
+  for(const o of [...(s.orders||[]),...(s.offers||[])])for(const it of o.items||[])if(!it.kind)it.kind="jar"; // round-1 orders were all jars
   for(const k of ["codex","est","mutations","sold","mastery","cards"])s[k]=s[k]||{};
-  s.codex.found=s.codex.found||{};
+  s.codex.found=s.codex.found||{};s.codex.recipes=s.codex.recipes||{};
   s.racks=s.racks||[[],[]];s.bins=s.bins||{small:0,jar:0,xl:0};
   s.meta=s.meta||{savedAt:Date.now()};
   {const keep=S;S=s;ensureStarters();ensureWeather();syncRacks();S=keep}
@@ -567,7 +617,7 @@ const maxHull=()=>cfg().maxHull+eff("maxHull");
 const hullRepair=()=>cfg().hullRepair+eff("hullRepair");
 const boatOut=()=>S.boatOutUntil!=null&&S.clock.day<=S.boatOutUntil;
 const tankCap=()=>cfg().tankCap+eff("tankSpace");
-const tankUsed=()=>S.tank.reduce((a,l)=>a+l.buds,0);
+const tankUsed=()=>S.tank.reduce((a,l)=>a+l.buds,0)+(S.tankPlants||[]).reduce((a,p)=>a+p.buds,0); // whole plants take their bud count in tank space
 const rackCap=()=>cfg().rackCap+eff("rackBuds");
 const rackCount=()=>cfg().startRacks+(S.racksBought||0)+eff("extraRack");
 const rackUsed=r=>r.reduce((a,l)=>a+l.buds,0);
@@ -575,7 +625,7 @@ const humidorCount=()=>1+(S.humidorsBought||0);
 const humidorCap=()=>humidorCount()*(cfg().humidorCap+eff("humidorSpace")); // Bigger Humidor adds to every Humidor
 const humidorUsed=()=>S.humidor.reduce((a,l)=>a+l.buds,0);
 const binCap=()=>cfg().binCap+eff("binSpace");
-const binsUsed=()=>Object.values(S.bins).reduce((a,b)=>a+b,0)+S.deliveries.reduce((a,d)=>a+Object.values(d.jars||{}).reduce((x,y)=>x+y,0),0);
+const binsUsed=()=>Object.values(S.bins).reduce((a,b)=>a+b,0)+S.deliveries.reduce((a,d)=>a+Object.values({...(d.jars||{}),...(d.items||{})}).reduce((x,y)=>x+y,0),0);
 const nodesVisible=()=>3+eff("nodesVisible");
 function syncRacks(){ // racks follow rackCount(); a rack beyond the count keeps drying what's on it, then goes away
   const n=rackCount();while(S.racks.length<n)S.racks.push([]);
@@ -635,11 +685,11 @@ function hullHit(parts,why){ // parts: list of damage numbers, each a separate h
 function sink(why){
   if(S.lives>0){
     S.lives--;S.location="home";S.pos=null;S.hull=Math.min(maxHull(),cfg().respawnHull);
-    const ld=loadRacks();
+    const ld=loadRacks();plantsToPool();
     addLog(`The Lucky Landshark went down (${why}). One phoenix feather spent — Finn and the boat respawn at the dock with Hull ${S.hull}, and the harvest tanks came back with her.`);
     ev("sink",{why,life:true,loaded:ld});toast("The boat sank! A phoenix feather was spent — you respawned at the dock with the tanks intact.");
   }else{
-    const lost=tankUsed();S.tank=[];S.location="home";S.pos=null;
+    const lost=tankUsed();S.tank=[];S.tankPlants=[];S.location="home";S.pos=null;
     const tow=cfg().salvageTow,paid=r2(Math.min(tow,Math.max(0,S.credits)));
     if(paid>0)money(-paid,"Salvage tow — The Lucky Landshark");
     S.towOwed=r2((S.towOwed||0)+tow-paid);
@@ -741,6 +791,7 @@ function revealed(n){if(hasTag(n,"Fog Bank")||wxNow()==="Fog")return [];const k=
 
 function sail(id){
   const n=nodeById(id);if(!n||S.location===id)return;
+  S.lastPlant=null;
   if(boatOut()){toast(`The Lucky Landshark is at the boathouse until ${fmtShort(S.boatOutUntil+1)}.`);return}
   if(nodeHidden(n)){toast("The Cold Snap hides that node today.");return}
   const c=tripCost(n),free=!!S.freeTrip,w=wxNow();
@@ -761,7 +812,7 @@ function arrive(n){
 }
 function returnHome(){
   if(atHome())return;
-  act(30,()=>{S.location="home";S.pos=null;const ld=loadRacks();ev("home",ld)},"Returned home and loaded the drying racks");
+  act(30,()=>{S.location="home";S.pos=null;S.lastPlant=null;const ld=loadRacks();ld.plants=plantsToPool();ev("home",ld)},"Returned home and loaded the drying racks");
 }
 
 /* ---------- strain rolls ---------- */
@@ -839,6 +890,7 @@ function harvest(){
       const buds=rollBuds(n,s,p.first),muts=rollMutations(n,p.first);
       const lot={strain:r.id,buds,muts,seep:hasTag(n,"Mana Seep"),hronn:w8==="Hrönn",plankton:wxNow()==="Plankton Bloom",day:S.clock.day};
       const kept=addToTank(lot);
+      S.lastPlant=kept===buds?{strain:r.id,buds,muts,lot:(S.tank.find(l=>sameLot(l,lot))||{}).id,node:n.id}:null;
       const what=`${s.name}${Object.keys(muts).length?` (${mutPlain(muts)})`:""} — ${plural(buds,"bud")}`;
       ev("plant",{name:s.name,buds,kept,muts:mutPlain(muts),twin:!!p.twin,discovery:r.discovery});
       if(p.twin)addLog("Himinglæva grins — the first plant comes with a twin.");
@@ -962,7 +1014,8 @@ function orderHumidor(){
 function nightlyDeliveries(){
   const notes=[];const due=S.deliveries.filter(d=>d.arrive<=S.clock.day);
   for(const d of due){
-    for(const [k,v] of Object.entries(d.jars||{}))S.bins[k]=(S.bins[k]||0)+v;
+    for(const [k,v] of Object.entries({...(d.jars||{}),...(d.items||{})}))S.bins[k]=(S.bins[k]||0)+v;
+    for(const b of d.bottles||[])S.flavors.push({flavor:b.flavor,drops:b.drops+eff("flavorDrops")});
     if(d.racks){S.racksBought=(S.racksBought||0)+d.racks;syncRacks()}
     if(d.humidors)S.humidorsBought=(S.humidorsBought||0)+d.humidors;
     notes.push(`A Hallmark's parcel appeared on the receiving circle: ${d.label}.`);ev("parcel",{text:d.label});
@@ -972,16 +1025,176 @@ function nightlyDeliveries(){
 }
 
 /* ================================================================
-   ORDERS
+   TIDE POOL — whole plants, crossing, Established strains, mutations
+   ================================================================ */
+const poolCap=()=>cfg().poolCap;
+const canParent=s=>s&&!s.colorless&&(isMono(s)||(S.est[s.id]&&S.est[s.id].done));
+const harvestable=s=>s&&(s.colorless||isMono(s)||(S.est[s.id]&&S.est[s.id].done));
+function keepWhole(){ // turn the plant just harvested back into a live plant for the tide pool
+  const lp=S.lastPlant;if(!lp||lp.kept)return;
+  const lot=S.tank.find(l=>l.id===lp.lot);
+  if(!lot||lot.buds<lp.buds){toast("That plant's buds have already moved on.");return}
+  lot.buds-=lp.buds;if(lot.buds<=0)S.tank=S.tank.filter(l=>l!==lot);
+  S.tankPlants.push({id:nid("tp"),strain:lp.strain,buds:lp.buds,muts:deep(lp.muts||{})});lp.kept=true;
+  addLog(`Kept the ${ST(lp.strain).name} plant whole for the tide pool. It rides home in the tanks.`);ev("keep",{name:ST(lp.strain).name});commit();
+}
+function plantsToPool(){ // on docking: live plants into the tide pool while there's room
+  let moved=0;
+  for(const p of S.tankPlants.slice()){if(S.pool.length>=poolCap())break;S.pool.push({id:nid("pp"),strain:p.strain,buds:p.buds,muts:p.muts||{},from:"sea"});S.tankPlants=S.tankPlants.filter(x=>x!==p);moved++}
+  if(moved)addLog(`Settled ${plural(moved,"plant")} into the tide pool.${S.tankPlants.length?` ${plural(S.tankPlants.length,"plant")} wait in the tanks — the pool is full.`:""}`);
+  return moved;
+}
+function recipeFor(a,b){return DB.strains.find(s=>s.recipe&&((s.recipe[0]===a&&s.recipe[1]===b)||(s.recipe[0]===b&&s.recipe[1]===a)))||null}
+const jeffHere=()=>S.jeffDay===S.clock.day;
+const crossTime=()=>Math.max(5,30-eff("crossTime"));
+function crossCheck(a,b){
+  if(!a||!b||a===b)return "Pick two different plants.";
+  const A=ST(a.strain),B=ST(b.strain);
+  if(A.colorless||B.colorless)return "Colorless plants are dead ends — they can't be crossed.";
+  if(!canParent(A))return `${A.name} isn't Established yet, so it can't be a parent.`;
+  if(!canParent(B))return `${B.name} isn't Established yet, so it can't be a parent.`;
+  if(A.colors.length===B.colors.length&&A.colors.every(c=>B.colors.includes(c)))return "Crossing two strains of the same colors adds nothing.";
+  return null;
+}
+function rollCrossMutation(){
+  let ch=cfg().mutCrossPct+eff("crossMut")+(eff("sharkSupervisor")&&jeffHere()?1:0);
+  const out={};let avail=shuffle(Object.keys(MUTATIONS));
+  for(const m of avail){if(Math.random()*100<ch){out[m]=1;ch/=4}else break}
+  // each hit adds a mutation to her list, or raises one she has a tier (max III)
+  const res={};
+  for(const m of Object.keys(out)){
+    if(!S.mutations[m]){S.mutations[m]=1;addLog(`Codex — new mutation: ${m}. ${MUTATIONS[m]}.`);ev("mutation",{name:m,tier:1});gainXP(10,"discovered a mutation");gainXP(5+eff("codexXP"),"new Codex entry");const pp=eff("codexPP");if(pp)S.pp+=pp;toast(`New mutation discovered: ${m}!`)}
+    else if(S.mutations[m]<3){S.mutations[m]++;addLog(`${m} rose to tier ${ROMAN[S.mutations[m]]} — every wild ${m} plant gets it too.`);ev("mutation",{name:m,tier:S.mutations[m]})}
+    res[m]=S.mutations[m];
+  }
+  return res;
+}
+function cross(aId,bId){
+  if(!atHome()){toast("The tide pool is at the foot of the cliff — head home first.");return}
+  const a=S.pool.find(p=>p.id===aId),b=S.pool.find(p=>p.id===bId),why=crossCheck(a,b);
+  if(why){toast(why);return}
+  act(crossTime(),()=>{
+    S.pool=S.pool.filter(p=>p!==a&&p!==b);gainXP(2,"crossed two plants");
+    const r=recipeFor(a.strain,b.strain),muts=rollCrossMutation(),jeff=eff("sharkSupervisor")&&jeffHere();
+    if(!r){
+      const pool=DB.strains.filter(s=>s.colorless);if(!pool.length){addLog("The cross took, but nothing grew.");return}
+      const c=pick(pool);if(!S.codex.found[c.id])discoverStrain(c.id);
+      S.pool.push({id:nid("pp"),strain:c.id,buds:rint(6,12),muts,from:"cross"});
+      addLog(`Crossed ${ST(a.strain).name} × ${ST(b.strain).name}: no recipe — a Colorless ${c.name} plant. A dead end, but its buds sell.`);
+      ev("cross",{a:ST(a.strain).name,b:ST(b.strain).name,child:c.name,recipe:false,muts:mutPlain(muts)});return;
+    }
+    const e=S.est[r.id]=S.est[r.id]||{progress:0,done:false,crosses:0};
+    if(!S.codex.recipes[r.id]){S.codex.recipes[r.id]=S.clock.day;addLog(`New recipe: ${ST(a.strain).name} × ${ST(b.strain).name} → ${r.name}.`);gainXP(10,"discovered a new recipe");if(!S.codex.found[r.id])discoverStrain(r.id)}
+    e.crosses++;
+    let note;
+    if(!e.done){
+      e.progress=Math.min(100,e.progress+cfg().crossPct+eff("crossProgress")+(jeff?5:0));
+      if(e.progress>=100){e.done=true;e.spread=3;e.estDay=S.clock.day;e.since=0;
+        addLog(`${r.name} is Established! It enters the wild as Scarce and can be sold. This cross's child stays in the pool.`);ev("established",{name:r.name});gainXP(20,"a strain became Established");toast(`${r.name} is Established!`);
+        S.pool.push({id:nid("pp"),strain:r.id,buds:rint(6,12),muts,from:"cross"});note="Established";}
+      else note=`${e.progress}% toward Established — the child goes back to the sea`;
+    }else{
+      e.since=(e.since||0)+1;
+      const floor=SPREAD_FLOOR[tierOf(r)];
+      if(e.since>=5&&e.spread>floor){e.spread--;e.since=0;addLog(`${r.name} spreads wider in the wild: now ${SPREADS[e.spread]}.`);ev("spread",{name:r.name,spread:SPREADS[e.spread]})}
+      S.pool.push({id:nid("pp"),strain:r.id,buds:rint(6,12),muts,from:"cross"});note="a new plant for the pool";
+    }
+    addLog(`Crossed ${ST(a.strain).name} × ${ST(b.strain).name} → ${r.name} (${note})${Object.keys(muts).length?`, with ${mutPlain(muts)}`:""}.${jeff?" Jeff supervised.":""}`);
+    ev("cross",{a:ST(a.strain).name,b:ST(b.strain).name,child:r.name,recipe:true,note,muts:mutPlain(muts)});
+  },null);
+}
+function harvestPool(id){
+  const p=S.pool.find(x=>x.id===id);if(!p)return;
+  if(!atHome()){toast("Head home first.");return}
+  const s=ST(p.strain);if(!harvestable(s)){toast(`${s.name} isn't Established yet — nothing from it can be sold.`);return}
+  act(15,()=>{
+    S.pool=S.pool.filter(x=>x!==p);
+    S.tank.push({id:nid("w"),strain:p.strain,buds:p.buds,muts:p.muts||{},day:S.clock.day});
+    gainXP(1,"harvested a plant");loadRacks();ev("plant",{name:s.name,buds:p.buds,kept:p.buds,muts:mutPlain(p.muts),pool:true});
+  },`Harvested the ${s.name} plant from the tide pool: ${plural(p.buds,"wet bud")}`);
+}
+function releasePlant(id){
+  const p=S.pool.find(x=>x.id===id)||S.tankPlants.find(x=>x.id===id);if(!p)return;
+  if(!confirm(`Release the ${ST(p.strain).name} plant back into the sea?`))return;
+  S.pool=S.pool.filter(x=>x!==p);S.tankPlants=S.tankPlants.filter(x=>x!==p);addLog(`Released a ${ST(p.strain).name} plant back into the sea.`);commit();
+}
+
+/* ================================================================
+   PARTS BINS, FLAVORS & HALLMARK'S (round 2)
+   ================================================================ */
+const bin=k=>S.bins[k]||0;
+function takeBin(k,n=1){if(bin(k)<n)return false;S.bins[k]-=n;if(!S.bins[k]&&!JARS[k])delete S.bins[k];return true}
+const putBin=(k,n=1)=>{S.bins[k]=(S.bins[k]||0)+n};
+const isTooled=k=>k==="core"||k==="shell"||S.tooled[k]!=null;
+function toolPart(k){
+  if(isTooled(k))return;
+  const fee=r2(TOOLING_FEE*(1-hmDiscount()/100));
+  if(!confirm(`Pay Hallmark's ${cr(fee)} to tool the ${partLabel(k).toLowerCase()} design? It's a one-time fee; after that you can order the part.`))return;
+  act(5,()=>{if(!pay(fee,`Hallmark's tooling — ${partLabel(k)}`))return false;S.tooled[k]=S.clock.day;ev("hallmark",{text:`tooling for the ${partLabel(k).toLowerCase()} (${cr(fee)})`})},`Hallmark's tooled the ${partLabel(k).toLowerCase()} design`);
+}
+const partPacks=k=>k==="core"?["single","pack","crate"]:k==="shell"?["single","pack","crate"]:partTier(k)==="decorative"?["single"]:["single","pack"];
+const unitPrice=k=>k==="core"?CORE_PRICE:k==="shell"?SHELL_PRICE:partPrice(k);
+const partPackPrice=(k,pk)=>r2(unitPrice(k)*JAR_PACKS[pk].n*(1-JAR_PACKS[pk].off)*(1-hmDiscount()/100));
+function orderPart(k,pk){
+  if(!isTooled(k)){toast("Tool that design first.");return}
+  const n=JAR_PACKS[pk].n,cost=partPackPrice(k,pk);
+  if(binsUsed()+n>binCap()){toast(`Parts bins are full (${binsUsed()}/${binCap()} including parcels on the way).`);return}
+  act(5,()=>{if(!pay(cost,`Hallmark's — ${JAR_PACKS[pk].label.toLowerCase()} of ${BIN_LABEL(k).toLowerCase()}`))return false;
+    S.deliveries.push({id:nid("p"),arrive:S.clock.day+rint(cfg().deliverMin,cfg().deliverMax),items:{[k]:n},label:`${JAR_PACKS[pk].label} — ${BIN_LABEL(k).toLowerCase()}`,cost});
+    ev("hallmark",{text:`${JAR_PACKS[pk].label} of ${BIN_LABEL(k).toLowerCase()} (${cr(cost)})`})},`Ordered ${n} ${BIN_LABEL(k).toLowerCase()} from Hallmark's — arriving in 2–4 days`);
+}
+const bottlesOwned=()=>S.flavors.length+S.deliveries.reduce((a,d)=>a+(d.bottles||[]).length,0);
+const dropsOf=f=>S.flavors.filter(b=>b.flavor===f).reduce((a,b)=>a+b.drops,0);
+const hasFlavor=f=>Object.entries(flavorDrops(f)).every(([k,n])=>dropsOf(k)>=n);
+function useFlavor(f){for(const [k,n] of Object.entries(flavorDrops(f))){let need=n;for(const b of S.flavors.filter(x=>x.flavor===k).sort((x,y)=>x.drops-y.drops)){const t=Math.min(need,b.drops);b.drops-=t;need-=t;if(!need)break}}S.flavors=S.flavors.filter(b=>b.drops>0)}
+function orderBottle(f,size){
+  const B=BOTTLES[size];if(bottlesOwned()>=FLAVOR_RACK){toast(`The flavor rack holds ${FLAVOR_RACK} bottles.`);return}
+  const cost=r2(B.price*(1-hmDiscount()/100));
+  act(5,()=>{if(!pay(cost,`Hallmark's — ${f} Flavor Solution (${B.label.toLowerCase()})`))return false;
+    S.deliveries.push({id:nid("p"),arrive:S.clock.day+rint(cfg().deliverMin,cfg().deliverMax),bottles:[{flavor:f,drops:B.drops}],label:`${f} Flavor Solution — ${B.label.toLowerCase()}`,cost});
+    ev("hallmark",{text:`${f} Flavor Solution, ${B.label.toLowerCase()} (${cr(cost)})`})},`Ordered a ${B.label.toLowerCase()} of ${f} Flavor Solution — arriving in 2–4 days`);
+}
+
+/* ================================================================
+   PENS IN CIRCULATION & REFILLS
+   ================================================================ */
+function addPens(o){
+  for(const it of o.items)if(it.kind==="pen"){const T=PEN_TIERS[it.tier];
+    const life=Math.round(T.life*(0.75+Math.random()*0.5));
+    S.pens.push({id:nid("pen"),tier:it.tier,faction:o.faction,who:o.who,planes:o.planes||[],sold:S.clock.day,ends:S.clock.day+life});S.pensSold=(S.pensSold||0)+1}
+}
+function nightlyPens(){
+  const notes=[];let gone=0,repl=0;
+  for(const p of S.pens.slice()){
+    const lost=Math.random()*100<cfg().penLoss,old=S.clock.day>=p.ends;
+    if(!lost&&!old)continue;
+    S.pens=S.pens.filter(x=>x!==p);gone++;ev("penGone",{tier:p.tier,who:p.who,lost});
+    if(Math.random()*100<cfg().replacePct){const f=FAC[p.faction];const up=Math.random()<.25&&p.tier!=="decorative"?TIER_KEYS[TIER_KEYS.indexOf(p.tier)+1]:p.tier;
+      const o=genPenOrder(f,{tier:up,who:p.who,planes:p.planes,replacement:true});if(o){S.offers.push(o);ev("offer",{...evO(o),expires:o.expires});repl++}}
+  }
+  if(gone)notes.push(`${plural(gone,"pen")} left circulation${repl?` — ${repl} owner${repl>1?"s":""} want${repl>1?"":"s"} a replacement`:""}.`);
+  if((S.pensSold||0)>=cfg().refillUnlock){
+    let n=0;const ch=cfg().refillPct+eff("loyalCustomers");
+    for(const p of shuffle(S.pens)){if(n>=cfg().refillCap)break;if(Math.random()*100<ch){const o=genRefill(p);if(o){S.offers.push(o);ev("offer",{...evO(o),expires:o.expires});n++}}}
+    if(n)notes.push(`${plural(n,"refill request")} came in.`);
+  }
+  return notes;
+}
+
+/* ================================================================
+   ORDERS — jars, cartridges, pens and refills
    ================================================================ */
 function matches(req,id){
-  const s=ST(id);if(!s||s.colorless)return false;
+  const s=ST(id);if(!s)return false;
+  if(!req)return true;                       // "any strain"
+  if(s.colorless)return false;
   if(req.type==="strain")return id===req.strain;
   if(req.type==="aff")return s.colors.length===req.colors.length&&req.colors.every(c=>s.colors.includes(c));
   if(req.type==="kw")return s.keywords.some(k=>k.k===req.k&&k.x>=req.min);
   return false;
 }
 function reqText(req,plain){
+  if(!req)return plain?"any strain":"<b>any strain</b>";
   if(req.type==="strain"){const s=ST(req.strain);return plain?(s?s.name:req.strain):strainTxt(req.strain,{kw:true})}
   if(req.type==="aff")return plain?`any ${affName(req.colors)} strain`:`${pips(req.colors)} any <b>${affName(req.colors)}</b> strain`;
   if(req.type==="kw")return plain?`any strain with ${req.k} ${req.min} or higher`:`any strain with <b>${esc(req.k)} ${req.min}</b> or higher`;
@@ -996,25 +1209,53 @@ function budPrice(id,muts){
   return p*masteryBonus(id);
 }
 function cheapestFor(req){
-  const c=DB.strains.filter(s=>!s.colorless&&matches(req,s.id)).sort((a,b)=>a.price-b.price)[0];
-  return c?c.id:null;
+  const pool=req?DB.strains.filter(s=>!s.colorless&&matches(req,s.id)):orderPool();
+  const c=pool.slice().sort((a,b)=>a.price-b.price)[0];return c?c.id:null;
 }
+const flavorFee=f=>!f?0:(f===HOUSE_BLEND?8:5)+eff("houseBlend");
+const cartUnit=(id,muts,fresh,flavor)=>3*budPrice(id,muts)*fresh/100+2+flavorFee(flavor);
+const budsPerCart=()=>eff("concentrate")?2:3;
+const itemReq=it=>it.kind==="pen"?it.cart.req:it.req;
+const itemFlavor=it=>it.kind==="pen"?it.cart.flavor:it.flavor;
+const namedParts=it=>Object.values(it.spec||{}).filter(Boolean).length;
+const cartOf=it=>it.kind==="pen"?(it.fill&&it.fill.cart):it.fill;
+function itemDone(it){return it.kind==="pen"?!!(it.fill&&it.fill.done):!!it.fill}
+const prefMet=it=>!!(it.pref&&cartOrLot(it)&&(cartOrLot(it).muts||{})[it.pref]);
+const cartOrLot=it=>it.kind==="pen"?(it.fill&&it.fill.cart):it.fill;
 function itemPrice(it,live){
-  const J=JARS[it.size];
-  if(live&&it.fill)return r2(J.buds*budPrice(it.fill.strain,it.fill.muts)*it.fill.fresh/100+J.price);
-  const id=cheapestFor(it.req);return r2(J.buds*(id?ST(id).price:1)+J.price);
+  const f=live?cartOrLot(it):null,id=f?f.strain:cheapestFor(itemReq(it)),muts=f?f.muts:{},fresh=f?f.fresh:100;
+  if(!id)return 0;
+  let p;
+  if(it.kind==="jar"){const J=JARS[it.size];p=J.buds*budPrice(id,muts)*fresh/100+J.price}
+  else if(it.kind==="cart")p=cartUnit(id,muts,fresh,it.flavor);
+  else if(it.kind==="refill")p=cartUnit(id,muts,fresh,it.flavor)*.8;
+  else p=PEN_TIERS[it.tier].price+2*namedParts(it)+cartUnit(id,muts,fresh,it.cart.flavor);
+  if(live&&prefMet(it))p*=1+cfg().prefPct/100;
+  return r2(p);
 }
+function itemShort(it){
+  if(it.kind==="jar"){const J=JARS[it.size];return it.req.type==="strain"?`${J.label} of ${reqText(it.req,true)}`:`${J.label} · ${reqText(it.req,true)}`}
+  if(it.kind==="cart")return `Cartridge · ${reqText(it.req,true)}${it.flavor?`, ${it.flavor}`:""}`;
+  if(it.kind==="refill")return `Refill · ${reqText(it.req,true)}${it.flavor?`, ${it.flavor}`:""}`;
+  return `${PEN_TIERS[it.tier].label} pen`;
+}
+function itemLabel(it){return it.kind==="jar"?JARS[it.size].label:it.kind==="cart"?"Cartridge":it.kind==="refill"?"Refill":`${PEN_TIERS[it.tier].label} pen`}
 function priceOf(o,live){
-  const lines=o.items.map(it=>[`${JARS[it.size].label}${live&&it.fill?` — ${ST(it.fill.strain).name}${it.fill.fresh<100?` (${it.fill.fresh}% fresh)`:""}`:""}`,itemPrice(it,live)]);
+  const lines=o.items.map(it=>{const f=live?cartOrLot(it):null;return [`${itemLabel(it)}${f?` — ${ST(f.strain).name}${f.fresh<100?` (${f.fresh}% fresh)`:""}`:""}${live&&prefMet(it)?` (+${cfg().prefPct}% ${it.pref})`:""}`,itemPrice(it,live)]});
   const sub=r2(lines.reduce((a,[,v])=>a+v,0));
   const urgentFee=o.urgent&&!o.missed?r2(sub*cfg().urgentPct/100):0;
   const total=r2(sub+urgentFee),referral=r2(total*cfg().referral/100),levy=r2(total*cfg().levyPct/100);
   return {lines,sub,urgentFee,total,referral,levy,net:r2(total-referral-levy),pp:r2((total-referral)*cfg().ppPct/100)};
 }
 function rarityBonus(r){return r==="Rare"?1:(r==="Mythic Rare"||r==="Beyond Mythic")?2:0}
+function itemRP(it,live){
+  const f=live?cartOrLot(it):null,id=f?f.strain:cheapestFor(itemReq(it));
+  const base=it.kind==="jar"?JARS[it.size].rp:it.kind==="pen"?PEN_TIERS[it.tier].rp:1;
+  return base+(id?rarityBonus(rarityOf(ST(id))):0);
+}
 function rpOf(o,live){
   if(live&&o.missed)return 0;
-  let rp=0;for(const it of o.items){const id=(live&&it.fill)?it.fill.strain:cheapestFor(it.req);rp+=JARS[it.size].rp+(id?rarityBonus(rarityOf(ST(id))):0)}
+  let rp=o.items.reduce((a,it)=>a+itemRP(it,live),0);
   const pf=effCard("patronRP");if(pf&&pf[1].faction===o.faction)rp+=eff("patronRP");
   return rp;
 }
@@ -1031,35 +1272,64 @@ function pickClient(f){
 }
 function orderPool(){return DB.strains.filter(s=>!s.colorless&&(isMono(s)||(S.est[s.id]&&S.est[s.id].done)))}
 const facW=(f,s)=>s.colors.reduce((a,c)=>a+(f.colors[c]||1),0)/s.colors.length*(f.key==="reg"?s.colors.length:1);
-function genItem(f){
+function genReq(f){
   const pool=orderPool();if(!pool.length)return null;
-  const size=wpick(f.sizes);
   const type=wpick(f.key==="reg"?{strain:6,aff:2,kw:1}:{strain:5,aff:3,kw:3});
   if(type==="aff"){
     const sets={};for(const s of pool){const k=s.colors.join("");sets[k]=sets[k]||{colors:s.colors,w:facW(f,s)}}
-    const k=wpick(Object.entries(sets).map(([k,v])=>[k,v.w]));return {size,req:{type:"aff",colors:sets[k].colors}};
+    const k=wpick(Object.entries(sets).map(([k,v])=>[k,v.w]));return {type:"aff",colors:sets[k].colors};
   }
   if(type==="kw"){
     const present=new Set(pool.flatMap(s=>s.keywords.map(k=>k.k)));
     let kws=f.keywords.filter(k=>present.has(k));if(!kws.length)kws=[...present];
     const k=pick(kws),maxX=Math.max(...pool.flatMap(s=>s.keywords.filter(x=>x.k===k).map(x=>x.x)));
-    const min=wpick(Array.from({length:maxX},(_,i)=>[i+1,maxX-i]));
-    return {size,req:{type:"kw",k,min}};
+    return {type:"kw",k,min:wpick(Array.from({length:maxX},(_,i)=>[i+1,maxX-i]))};
   }
-  const id=wpick(pool.map(s=>[s.id,facW(f,s)*(S.codex.found[s.id]?3:1)]));
-  return {size,req:{type:"strain",strain:id}};
+  return {type:"strain",strain:wpick(pool.map(s=>[s.id,facW(f,s)*(S.codex.found[s.id]?3:1)]))};
 }
-function itemShort(it){const J=JARS[it.size];return it.req.type==="strain"?`${J.label} of ${reqText(it.req,true)}`:`${J.label} · ${reqText(it.req,true)}`}
-function genOrder(f){
-  const n=wpick({1:5,2:3,3:2});const items=[];
-  for(let i=0;i<+n;i++){const it=genItem(f);if(it)items.push({...it,fill:null})}
+function genFlavor(f,chance){
+  const P=PRODUCTS[f.key];if(Math.random()>=(chance??P.flav))return null;
+  return wpick([[HOUSE_BLEND,P.blend||2],...FLAVORS.filter(x=>x!=="Peach"&&x!=="Mango").map(x=>[x,1]),["Peach",.5],["Mango",.5]]);
+}
+function addPrefs(f,items){
+  const have=Object.keys(S.mutations||{});if(!have.length)return;
+  const fav=(PREF_MUTS[f.key]||[]).filter(m=>have.includes(m)),chance=fav.length?.3:.1;
+  for(const it of items)if(Math.random()<chance)it.pref=pick(fav.length?fav:have);
+}
+function finishOrder(f,items,opts={}){
   if(!items.length)return null;
-  const cl=pickClient(f),urgent=Math.random()*100<cfg().urgentChance;
+  addPrefs(f,items);
+  const cl=opts.who?{who:opts.who,planes:opts.planes||[]}:pickClient(f),urgent=!opts.refill&&Math.random()*100<cfg().urgentChance;
   const o={id:nid("o"),faction:f.key,who:cl.who,planes:cl.planes,items,urgent,urgentDays:urgent?rint(2,5)+eff("rushDays"):0,
-    created:S.clock.day,expires:S.clock.day+rint(3,7),stage:"offer",line:pick(ORDER_LINES)};
-  o.title=items.length===1?itemShort(items[0]):`${items.length}-item order`;
+    created:S.clock.day,expires:S.clock.day+rint(3,7),stage:"offer",line:opts.line||pick(ORDER_LINES),kind:opts.kind||"order"};
+  const pens=items.filter(i=>i.kind==="pen"),carts=items.filter(i=>i.kind==="cart");
+  o.title=opts.title||(items.length===1?itemShort(items[0]):pens.length?`${pens.length>1?pens.length+" ":""}${PEN_TIERS[pens[0].tier].label} pen${pens.length>1?"s":""}${carts.length?` + ${plural(carts.length,"cartridge")}`:""}`:carts.length===items.length?`${items.length} cartridges`:`${items.length}-item order`);
   o.quote=priceOf(o,false).total;
   return o;
+}
+function genPenOrder(f,opts={}){
+  const P=PRODUCTS[f.key];const tier=opts.tier||wpick(P.tiers);if(!tier)return null;
+  const n=opts.tier?1:(Math.random()<.15?2:1),items=[];
+  for(let i=0;i<n;i++){
+    const spec={};for(const k of Object.keys(PART_DESIGNS))if(PART_DESIGNS[k][tier]&&Math.random()<.35)spec[k]=pick(PART_DESIGNS[k][tier]);
+    const cart={req:null,flavor:HOUSE_BLEND};const r=Math.random();
+    if(r<.12)cart.req=genReq(f);else if(r<.24)cart.flavor=genFlavor(f,1);
+    items.push({kind:"pen",tier,spec,cart,fill:null});
+  }
+  if(Math.random()*100<cfg().addonPct)for(let i=rint(1,3);i>0;i--){const req=genReq(f);if(req)items.push({kind:"cart",req,flavor:Math.random()<.5?genFlavor(f,1):null,fill:null})}
+  return finishOrder(f,items,{who:opts.who,planes:opts.planes,line:opts.replacement?"The last one finally gave out. Same again — or a little better.":null});
+}
+function genRefill(p){
+  const f=FAC[p.faction],req=genReq(f);if(!req)return null;
+  return finishOrder(f,[{kind:"refill",req,flavor:genFlavor(f),fill:null}],{who:p.who,planes:p.planes,refill:true,kind:"refill",line:pick(["Empty again. You know the drill.","Same pen, fresh fill, please.","Ran dry on the road. Refill when you can."])});
+}
+function genOrder(f){
+  const P=PRODUCTS[f.key]||{w:{jar:1}};let prod=wpick(P.w)||"jar";
+  if(prod==="pen"){const o=genPenOrder(f);if(o)return o;prod="jar"}
+  const n=+wpick({1:5,2:3,3:2}),items=[];
+  for(let i=0;i<n;i++){const req=genReq(f);if(!req)continue;
+    items.push(prod==="cart"?{kind:"cart",req,flavor:genFlavor(f),fill:null}:{kind:"jar",size:wpick(f.sizes),req,fill:null})}
+  return finishOrder(f,items);
 }
 /* ---------- working an order ---------- */
 const findOrder=id=>S.orders.find(o=>o.id===id);
@@ -1072,42 +1342,86 @@ function accept(oid){
   S.orders.push(o);addLog(`Accepted: ${o.title} — ${FAC[o.faction].name} on behalf of ${o.who}.`);ev("accept",{...evO(o),deadline:o.deadline});commit();
 }
 function decline(oid){const o=S.offers.find(x=>x.id===oid);S.offers=S.offers.filter(x=>x.id!==oid);if(o)ev("pass",evO(o));addLog(o?`Passed on: ${o.title}.`:"Let an order offer go.");commit()}
-function sources(it){
-  const need=JARS[it.size].buds;
-  return [...S.humidor.map(l=>["h",l]),...S.loose.map(l=>["l",l])].filter(([,l])=>l.buds>=need&&matches(it.req,l.strain))
+function sources(req,need){
+  return [...S.humidor.map(l=>["h",l]),...S.loose.map(l=>["l",l])].filter(([,l])=>l.buds>=need&&matches(req,l.strain))
     .sort((a,b)=>b[1].fresh-a[1].fresh||budPrice(b[1].strain,b[1].muts)-budPrice(a[1].strain,a[1].muts));
 }
 const srcLabel=([w,l])=>`${ST(l.strain).name}${Object.keys(l.muts||{}).length?` · ${mutPlain(l.muts)}`:""} · ${l.fresh}% fresh · ${l.buds} buds ${w==="h"?"(Humidor)":"(loose)"}`;
 const jarTime=size=>Math.max(1,JARS[size].time-eff("sealTime"));
+const extractTime=()=>Math.max(2,10-eff("extractTime"));
+const penTime=tier=>Math.max(5,PEN_TIERS[tier].time-eff("penTime"));
+function takeLot(src,req,need){
+  const [w,id]=src.split(":"),list=w==="h"?S.humidor:S.loose,l=list.find(x=>x.id===id);
+  if(!l||l.buds<need||!matches(req,l.strain))return null;
+  l.buds-=need;if(l.buds<=0)list.splice(list.indexOf(l),1);
+  return {strain:l.strain,buds:need,muts:deep(l.muts||{}),fresh:l.fresh};
+}
+function firstSrc(req,need){const c=sources(req,need);return c.length?c[0][0]+":"+c[0][1].id:null}
 function jarItem(oid,idx,src){
   const o=findOrder(oid),it=o&&o.items[idx];if(!it||it.fill)return;
   if(!atHome()){toast("The jar sealing station is at home.");return}
-  if(!src){const c=sources(it);if(!c.length){toast("Nothing in the Humidor or on the counter matches.");return}src=c[0][0]+":"+c[0][1].id}
-  const [w,id]=src.split(":"),list=w==="h"?S.humidor:S.loose,l=list.find(x=>x.id===id),J=JARS[it.size];
-  if(!l||l.buds<J.buds||!matches(it.req,l.strain)){toast("That lot doesn't fit this jar.");return}
-  if((S.bins[it.size]||0)<1){toast(`No empty ${J.label.toLowerCase()}s in the parts bins — order some from Hallmark's.`);return}
+  const J=JARS[it.size];src=src||firstSrc(it.req,J.buds);if(!src){toast("Nothing in the Humidor or on the counter matches.");return}
+  if(bin(it.size)<1){toast(`No empty ${J.label.toLowerCase()}s in the parts bins — order some from Hallmark's.`);return}
   const mana=r2(cfg().sealMana*manaMult());
   act(jarTime(it.size),()=>{
-    if(mana>0&&!pay(mana,"Metered Mana — jar seal"))return false;
-    S.bins[it.size]--;l.buds-=J.buds;if(l.buds<=0)(w==="h"?S.humidor:S.loose).splice(list.indexOf(l),1);
-    it.fill={strain:l.strain,buds:J.buds,muts:deep(l.muts||{}),fresh:l.fresh};
-    ev("jar",{text:`${J.label} of ${ST(l.strain).name} (${l.fresh}% fresh)`});
-  },`Jarred ${J.buds} buds of ${ST(l.strain).name} into a ${J.label.toLowerCase()} and sealed it`);
+    const lot=takeLot(src,it.req,J.buds);if(!lot){toast("That lot doesn't fit this jar.");return false}
+    if(mana>0)money(-mana,"Metered Mana — jar seal");
+    takeBin(it.size);it.fill=lot;ev("jar",{text:`${J.label} of ${ST(lot.strain).name} (${lot.fresh}% fresh)`});
+  },`Jarred ${J.buds} buds into a ${J.label.toLowerCase()} and sealed it`);
 }
 function unjar(oid,idx){
-  const o=findOrder(oid),it=o&&o.items[idx];if(!it||!it.fill||o.stage!=="filling")return;
-  act(5,()=>{S.loose.push({id:nid("l"),strain:it.fill.strain,buds:it.fill.buds,muts:it.fill.muts,fresh:it.fill.fresh,grace:0});S.bins[it.size]=(S.bins[it.size]||0)+1;it.fill=null},
+  const o=findOrder(oid),it=o&&o.items[idx];if(!it||it.kind!=="jar"||!it.fill||o.stage!=="filling")return;
+  act(5,()=>{S.loose.push({id:nid("l"),strain:it.fill.strain,buds:it.fill.buds,muts:it.fill.muts,fresh:it.fill.fresh,grace:0});putBin(it.size);it.fill=null},
     "Unpacked a jar — the buds are loose now (no fresh grace period) and the jar went back in the bins");
+}
+function fillCart(oid,idx,src){ // a cartridge, a refill, or a pen's included cartridge
+  const o=findOrder(oid),it=o&&o.items[idx];if(!it||cartOf(it))return;
+  if(!atHome()){toast("The extraction still is at home.");return}
+  const req=itemReq(it),flavor=itemFlavor(it),need=budsPerCart(),refill=it.kind==="refill";
+  src=src||firstSrc(req,need);if(!src){toast("Nothing dried matches.");return}
+  if(!refill&&bin("shell")<1){toast("No cartridge shells — order some from Hallmark's.");return}
+  if(flavor&&!hasFlavor(flavor)){toast(`Out of ${flavor} — order Flavor Solution from Hallmark's.`);return}
+  const mana=r2(cfg().extractMana*manaMult());
+  act(extractTime(),()=>{
+    const lot=takeLot(src,req,need);if(!lot){toast("That lot doesn't fit.");return false}
+    if(mana>0)money(-mana,"Metered Mana — extraction");
+    if(!refill)takeBin("shell");if(flavor)useFlavor(flavor);
+    const c={...lot,flavor};
+    if(it.kind==="pen")it.fill={cart:c,done:false};else it.fill=c;
+    gainXP(1,"extracted a cartridge");
+    ev("extract",{text:`${refill?"Refilled a returned cartridge":"Filled a cartridge"} with ${ST(lot.strain).name}${flavor?`, ${flavor}`:""}`});
+  },`${refill?"Refilled the returned cartridge":"Extracted and filled a cartridge"} — ${need} buds${flavor?`, a drop of ${flavor}`:""}, sealed`);
+}
+function penOptions(it,kind){
+  const tier=it.tier,names=(PART_DESIGNS[kind][tier]||[]),want=it.spec&&it.spec[kind];
+  return names.filter(n=>!want||n===want).map(n=>partKey(kind,n)).filter(k=>bin(k)>0);
+}
+const penKinds=tier=>Object.keys(PART_DESIGNS).filter(k=>PART_DESIGNS[k][tier]);
+function assemblePen(oid,idx,choice){
+  const o=findOrder(oid),it=o&&o.items[idx];if(!it||it.kind!=="pen"||!it.fill||it.fill.done)return;
+  if(!atHome()){toast("The pen bench is at home.");return}
+  const parts={};
+  for(const k of penKinds(it.tier)){const opts=penOptions(it,k),c=choice&&choice[k]&&opts.includes(choice[k])?choice[k]:opts[0];
+    if(!c){const want=it.spec&&it.spec[k];toast(`No ${want?partLabel(partKey(k,want)).toLowerCase():PEN_TIERS[it.tier].label.toLowerCase()+" "+PART_KINDS[k].toLowerCase()} in the bins${want&&!isTooled(partKey(k,want))?" — tool the design at Hallmark's first":""}.`);return}
+    parts[k]=c}
+  if(bin("core")<1){toast("No mana cores in the bins.");return}
+  act(penTime(it.tier),()=>{
+    for(const k of Object.values(parts))takeBin(k);takeBin("core");
+    it.fill.parts=parts;it.fill.done=true;gainXP(PEN_TIERS[it.tier].xp,`assembled a ${it.tier} pen`);
+    ev("pen",{text:`${PEN_TIERS[it.tier].label} pen: ${Object.values(parts).map(partLabel).join(", ")}`});
+  },`Assembled a ${it.tier} pen: ${Object.values(parts).map(partLabel).join(", ").toLowerCase()}`);
 }
 function abandon(oid){
   const o=findOrder(oid);if(!o)return;
   if(o.stage!=="filling"){toast("It's already packed.");return}
-  if(!confirm("Cancel this order? Any jars you filled are unpacked: the buds go loose and the jars go back in the bins. No pay, no RP."))return;
-  for(const it of o.items)if(it.fill){S.loose.push({id:nid("l"),strain:it.fill.strain,buds:it.fill.buds,muts:it.fill.muts,fresh:it.fill.fresh,grace:0});S.bins[it.size]=(S.bins[it.size]||0)+1}
+  if(!confirm("Cancel this order? Filled jars are unpacked (the buds go loose, the jars back in the bins) and assembled pens come apart (parts back in the bins). Extracted cartridges are lost. No pay, no RP."))return;
+  for(const it of o.items){
+    if(it.kind==="jar"&&it.fill){S.loose.push({id:nid("l"),strain:it.fill.strain,buds:it.fill.buds,muts:it.fill.muts,fresh:it.fill.fresh,grace:0});putBin(it.size)}
+    if(it.kind==="pen"&&it.fill&&it.fill.done){for(const k of Object.values(it.fill.parts))putBin(k);putBin("core")}}
   S.orders=S.orders.filter(x=>x!==o);addLog(`Cancelled: ${o.title}.`);ev("cancel",evO(o));commit();
 }
 function packOrder(oid){
-  const o=findOrder(oid);if(!o||o.stage!=="filling"||!o.items.every(it=>it.fill))return;
+  const o=findOrder(oid);if(!o||o.stage!=="filling"||!o.items.every(itemDone))return;
   if(!atHome()){toast("Packing happens in the dispatch room.");return}
   act(15,()=>{o.stage="packed"},"Packed the order: parcel paper, twine, wax and the hanko seal");
 }
@@ -1121,10 +1435,11 @@ function sendOrder(oid){
     gainPP(p.total-p.referral);
     if(rp)addRP(o.faction,rp);
     gainXP(5*rp,"completed order");
-    for(const it of o.items)sellBuds(it.fill.strain,it.fill.buds);
+    for(const it of o.items){const f=cartOrLot(it);sellBuds(f.strain,f.buds)}
+    addPens(o);
     S.orders=S.orders.filter(x=>x!==o);
     S.done.unshift({id:o.id,title:o.title,who:o.who,faction:o.faction,day:S.clock.day,total:p.total,net:p.net,rp,urgent:o.urgent,missed:!!o.missed,
-      items:o.items.map(it=>`${JARS[it.size].label} of ${ST(it.fill.strain).name}`)});
+      items:o.items.map(it=>`${itemLabel(it)} — ${ST(cartOrLot(it).strain).name}`)});
     if(S.done.length>200)S.done.length=200;
     ev("deliver",{...evO(o),total:p.total,net:p.net,rp,missed:!!o.missed});
     toast(`Delivered! ${cr(p.net)} after the referral and levy, +${rp} RP.`);
@@ -1231,17 +1546,20 @@ function endDay(){
 }
 function overnight(){
   const notes=[];
-  if(!atHome()){S.location="home";S.pos=null;loadRacks();notes.push("Finn sailed home and loaded the racks.")}
+  if(!atHome()){S.location="home";S.pos=null;loadRacks();plantsToPool();notes.push("Finn sailed home and loaded the racks.")}
+  S.lastPlant=null;
   const oldMonth=monthOf(S.clock.day);
   notes.push(...nightlyDrying());
   S.clock.day++;S.clock.min=420;
   {const before=S.hull;S.hull=Math.min(maxHull(),S.hull+hullRepair());if(S.hull>before&&before<maxHull())notes.push(`Hull repaired overnight: ${S.hull}/${maxHull()}.`)}
   if(S.boatOutUntil!=null&&S.clock.day===S.boatOutUntil+1){notes.push("The Lucky Landshark is back in the water.");S.boatOutUntil=null}
   ensureWeather();{const w=wxNow();ev("weather",{w});notes.push(`Weather: ${wxIcon(w)} ${w}.`)}
+  if(Math.random()*100<cfg().jeffPct){S.jeffDay=S.clock.day;notes.push("Jeff is napping by the tide pool today.")}
   notes.push(...nightlyDeliveries());
   const before=S.offers.length;for(const o of S.offers)if(o.expires<S.clock.day)ev("expire",evO(o));S.offers=S.offers.filter(o=>o.expires>=S.clock.day);
   if(before-S.offers.length)notes.push(`${plural(before-S.offers.length,"offer")} expired.`);
   for(const o of S.orders)if(o.urgent&&!o.missed&&S.clock.day>o.deadline){o.missed=true;ev("missed",evO(o));notes.push(`Missed the deadline on ${o.title} — no urgency fee, no RP.`)}
+  notes.push(...nightlyPens());
   notes.push(...runPayroll());
   notes.push(...payTow());
   const nm=monthOf(S.clock.day);
@@ -1406,7 +1724,7 @@ const GH={
 /* ================================================================
    RENDER
    ================================================================ */
-const TABS=[["sea","Sea"],["works","Glintworks"],["orders","Orders"],["hallmark","Hallmark's"],["factions","Factions"],["finn","Finn"],["cards","Perk Cards"],["codex","Codex"],["ledger","Books"],["settings","Settings"]];
+const TABS=[["sea","Sea"],["works","Glintworks"],["pool","Tide Pool"],["orders","Orders"],["hallmark","Hallmark's"],["factions","Factions"],["finn","Finn"],["cards","Perk Cards"],["codex","Codex"],["ledger","Books"],["settings","Settings"]];
 function render(){if(S){ensureWeather();syncRacks()}renderStatus();renderTabs();const fn=VIEWS[UI.tab]||VIEWS.sea;$("#view").innerHTML=fn();if(UI.tab==="sea")bindMap()}
 function renderStatus(){
   if(!S)return;
@@ -1504,8 +1822,9 @@ function weatherPanel(){
       <div class="tiny muted" style="margin-top:6px">Favored by season — Spring: ${SEASONS.Spring.join(", ")} · Summer: ${SEASONS.Summer.join(", ")} · Autumn: ${SEASONS.Autumn.join(", ")} · Winter: ${SEASONS.Winter.join(", ")}.</div></details></div>`;
 }
 function tankTable(){
-  if(!S.tank.length)return `<div class="empty">The tanks are empty.</div>`;
-  return `<div class="tscroll"><table><tr><th>Strain</th><th>Wet buds</th><th>Dries in</th><th></th></tr>${S.tank.map(l=>`<tr><td>${lotName(l)}${l.seep?` <span class="tag" title="Mana Seep: dries in half the time">💧</span>`:""}${l.hronn?` <span class="tag" title="Hrönn: 1 day faster">Hrönn</span>`:""}${l.plankton?` <span class="tag" title="Plankton Bloom: 1 extra day">🦐</span>`:""}</td><td>${l.buds}</td><td>${plural(dryDays(l),"day")}</td><td><button class="btn sm ghost" data-act="dumptank" data-id="${l.id}">Release</button></td></tr>`).join("")}</table></div>`;
+  if(!S.tank.length&&!S.tankPlants.length)return `<div class="empty">The tanks are empty.</div>`;
+  const plants=S.tankPlants.map(p=>`<tr><td>🌱 ${strainTxt(p.strain)} ${mutTxt(p.muts)} <span class="tag">whole plant</span></td><td>${p.buds}</td><td class="tiny muted">tide pool</td><td><button class="btn sm ghost" data-act="release" data-id="${p.id}">Release</button></td></tr>`).join("");
+  return `<div class="tscroll"><table><tr><th>Strain</th><th>Wet buds</th><th>Dries in</th><th></th></tr>${plants}${S.tank.map(l=>`<tr><td>${lotName(l)}${l.seep?` <span class="tag" title="Mana Seep: dries in half the time">💧</span>`:""}${l.hronn?` <span class="tag" title="Hrönn: 1 day faster">Hrönn</span>`:""}${l.plankton?` <span class="tag" title="Plankton Bloom: 1 extra day">🦐</span>`:""}</td><td>${l.buds}</td><td>${plural(dryDays(l),"day")}</td><td><button class="btn sm ghost" data-act="dumptank" data-id="${l.id}">Release</button></td></tr>`).join("")}</table></div>`;
 }
 const VIEWS={};
 VIEWS.sea=()=>{
@@ -1534,6 +1853,7 @@ VIEWS.sea=()=>{
        <button class="btn" data-act="harvest" ${here&&here.left>0&&!full?"":"disabled"}>Harvest a plant (${fmtDur(here?plantTime(here):15)}${here&&plantDmg(here)?`, −${plantDmg(here)} Hull`:""})</button>
        <button class="btn ghost" data-act="home" ${atHome()?"disabled":""}>Return home &amp; load racks (30 min)</button>
       </div>
+      ${S.lastPlant&&!S.lastPlant.kept&&!atHome()?`<div class="slot" style="margin-top:8px"><div class="row between"><span class="small">Just harvested: ${strainTxt(S.lastPlant.strain)} ${mutTxt(S.lastPlant.muts)} · ${S.lastPlant.buds} buds</span><button class="btn sm verd" data-act="keepwhole">Keep it whole for the tide pool</button></div><div class="tiny muted">${canParent(ST(S.lastPlant.strain))?"It can parent a cross.":"Not a parent until it's Established."} The pool has ${poolCap()-S.pool.length} free spot${poolCap()-S.pool.length===1?"":"s"}.</div></div>`:""}
       ${here?`<p class="small muted">${plural(here.left,"plant")} left before this node fades.${full?" <b>The tanks are full.</b>":""}</p>`:""}
     </div>
     <div class="panel"><h3>Harvest tanks <span class="meta">${tankUsed()}/${tankCap()} wet buds</span></h3>
@@ -1544,81 +1864,178 @@ VIEWS.sea=()=>{
    </div></div>`;
 };
 
-/* ---------- GLINTWORKS (drying, Humidor, bins) ---------- */
+/* ---------- GLINTWORKS (drying, Humidor, bins, flavors) ---------- */
+function binTable(){
+  const keys=[...Object.keys(JARS),"shell","core",...Object.keys(S.bins).filter(k=>k.includes(":")).sort((a,b)=>TIER_KEYS.indexOf(partTier(a))-TIER_KEYS.indexOf(partTier(b))||a.localeCompare(b))];
+  return `<table>${keys.map(k=>`<tr><td class="small">${esc(BIN_LABEL(k))}${JARS[k]?` <span class="tiny muted">(${JARS[k].buds} buds)</span>`:k.includes(":")?` <span class="tiny muted">${PEN_TIERS[partTier(k)].label}</span>`:""}</td><td><b>${bin(k)}</b></td></tr>`).join("")}</table>`;
+}
+function flavorTable(){
+  const by={};for(const b of S.flavors){by[b.flavor]=by[b.flavor]||{drops:0,n:0};by[b.flavor].drops+=b.drops;by[b.flavor].n++}
+  const rows=Object.entries(by).sort((a,b)=>FLAVORS.indexOf(a[0])-FLAVORS.indexOf(b[0]));
+  const blend=Math.min(dropsOf("Peach"),dropsOf("Mango"));
+  return rows.length?`<table>${rows.map(([f,v])=>`<tr><td class="small">${esc(f)}</td><td class="small">${v.drops} drops</td><td class="tiny muted">${plural(v.n,"bottle")}</td></tr>`).join("")}</table>
+   <p class="tiny muted">Enough for ${plural(blend,"cartridge")} of ${HOUSE_BLEND} (1 Peach + 1 Mango drop each).</p>`:`<p class="empty">No Flavor Solution on the rack.</p>`;
+}
 VIEWS.works=()=>{
   const cap=rackCap(),n=rackCount();
   const racks=S.racks.map((r,i)=>`<div class="rack"><div class="row between"><b>Rack ${i+1}</b>${i>=n?`<span class="tag warn">finishing its batch</span>`:""}<span class="small muted">${rackUsed(r)}/${cap} buds</span></div>
      <div class="bar" style="margin:4px 0"><i style="width:${Math.min(100,rackUsed(r)/cap*100)}%"></i></div>
      ${r.length?r.map(l=>`<div class="small row between"><span>${lotName(l)} · ${l.buds}</span><span class="muted">${l.daysLeft<=1?"ready tomorrow":`${l.daysLeft} days left`}</span></div>`).join(""):`<div class="tiny muted">Empty</div>`}</div>`).join("");
   const hum=S.humidor.slice().sort((a,b)=>RARITY_ORDER.indexOf(rarityOf(ST(b.strain)))-RARITY_ORDER.indexOf(rarityOf(ST(a.strain)))||ST(a.strain).name.localeCompare(ST(b.strain).name));
-  const binRow=k=>`<tr><td>${JARS[k].label} <span class="tiny muted">(${JARS[k].buds} buds)</span></td><td><b>${S.bins[k]||0}</b></td></tr>`;
+  const pensBy=TIER_KEYS.map(t=>[t,S.pens.filter(p=>p.tier===t).length]);
   return `${dbBanner()}${atHome()?"":`<div class="banner">Finn is out on the water. The racks keep drying, but the workshop is back at the lighthouse.</div>`}
   <div class="grid g2">
    <div class="grid">
     <div class="panel"><h3>${humidorCount()>1?`The Humidors <span class="small muted">×${humidorCount()}</span>`:"The Humidor"} <span class="meta">${humidorUsed()}/${humidorCap()} buds</span></h3>
      <div class="bar brass"><i style="width:${Math.min(100,humidorUsed()/humidorCap()*100)}%"></i></div>
-     <p class="tiny muted">Cedar-lined, brass fittings, a little mana hygrometer. Dried buds land here straight off the racks, and their freshness is locked. Jar them when an order needs them.</p>
+     <p class="tiny muted">Cedar-lined, brass fittings, a little mana hygrometer. Dried buds land here straight off the racks, and their freshness is locked. Jar them or extract them when an order needs them.</p>
      ${hum.length?`<div class="tscroll"><table><tr><th>Strain</th><th>Rarity</th><th>Buds</th><th>Fresh</th><th>Per bud</th><th></th></tr>${hum.map(l=>`<tr><td>${lotName(l)}</td><td>${rarTag(rarityOf(ST(l.strain)))}</td><td>${l.buds}</td><td>${freshTxt(l)}</td><td>${cr(budPrice(l.strain,l.muts)*l.fresh/100)}</td><td><button class="btn sm ghost" data-act="discard" data-where="humidor" data-id="${l.id}">Discard</button></td></tr>`).join("")}</table></div>`:`<div class="empty">Nothing dried yet. Harvest, load the racks, End Day.</div>`}
     </div>
     ${S.loose.length?`<div class="panel"><h3>Loose buds <span class="meta">losing freshness</span></h3>
      <p class="tiny muted">Dried buds outside the Humidor stay fully fresh for ${cfg().freshGrace+eff("freshDays")} days, then lose ${cfg().freshLoss}% a day. Unpacked jars start losing right away.</p>
      <div class="tscroll"><table><tr><th>Strain</th><th>Buds</th><th>Fresh</th><th></th><th></th></tr>${S.loose.map(l=>`<tr><td>${lotName(l)}</td><td>${l.buds}</td><td>${freshTxt(l)}</td><td class="tiny muted">${l.grace>0?`${plural(l.grace,"day")} before it fades`:`−${cfg().freshLoss}%/day`}</td>
        <td class="row" style="gap:4px"><button class="btn sm" data-act="tohumidor" data-id="${l.id}" ${atHome()&&humidorUsed()<humidorCap()?"":"disabled"}>Store in Humidor</button><button class="btn sm ghost" data-act="discard" data-where="loose" data-id="${l.id}">Discard</button></td></tr>`).join("")}</table></div></div>`:""}
+    <div class="panel"><h3>Pens in Circulation <span class="meta">${S.pens.length} out there · ${S.pensSold||0} sold</span></h3>
+     <div class="grid g3">${pensBy.map(([t,c])=>`<div class="statbox"><div class="muted small">${PEN_TIERS[t].label}</div><div class="n">${c}</div><div class="tiny muted">~${PEN_TIERS[t].life} days each</div></div>`).join("")}</div>
+     <p class="tiny muted" style="margin-top:8px">${(S.pensSold||0)>=cfg().refillUnlock?`Each day, every pen has a ${cfg().refillPct+eff("loyalCustomers")}% chance of a refill request (at most ${cfg().refillCap} a day).`:`Refill requests start once ${cfg().refillUnlock} pens have sold (${S.pensSold||0} so far).`} Pens wear out, and each has a ${cfg().penLoss}% daily chance of being lost; ${cfg().replacePct}% of owners come back for a replacement.</p></div>
    </div>
    <div class="grid">
     <div class="panel"><h3>Drying racks <span class="meta">${n} rack${n>1?"s":""} × ${cap} buds</span></h3>
      <p class="tiny muted">Common 1 day · Uncommon 2 · Rare 3 · Mythic Rare and Apex 5. Each rack in use costs ${cr(cfg().dryMana)} Metered Mana a night${wxNow()==="Mana Tide"?" (half tonight — Mana Tide)":""}.</p>
-     ${S.tank.length&&atHome()?`<div class="row" style="margin-bottom:6px"><button class="btn sm" data-act="loadracks">Load ${plural(tankUsed(),"wet bud")} from the tanks</button></div>`:""}
+     ${S.tank.length&&atHome()?`<div class="row" style="margin-bottom:6px"><button class="btn sm" data-act="loadracks">Load ${plural(S.tank.reduce((a,l)=>a+l.buds,0),"wet bud")} from the tanks</button></div>`:""}
      ${racks}</div>
-    <div class="panel"><h3>Parts bins <span class="meta">${binsUsed()}/${binCap()} items</span></h3>
-     <table>${Object.keys(JARS).map(binRow).join("")}</table>
+    <div class="panel"><h3>Parts bins <span class="meta">${binsUsed()}/${binCap()} items</span></h3>${binTable()}
      ${S.deliveries.length?`<h4 style="margin-top:10px">On the way from Hallmark's</h4><table>${S.deliveries.map(d=>`<tr><td class="small">${esc(d.label)}</td><td class="small muted">arrives ${fmtShort(d.arrive)}</td></tr>`).join("")}</table>`:""}
      <div class="row" style="margin-top:8px"><a href="#" class="small" data-tab="hallmark">Order from Hallmark's →</a></div></div>
+    <div class="panel"><h3>Flavor rack <span class="meta">${S.flavors.length}/${FLAVOR_RACK} bottles</span></h3>${flavorTable()}</div>
+   </div></div>`;
+};
+
+/* ---------- TIDE POOL ---------- */
+function poolPlantRow(p){
+  const s=ST(p.strain),e=S.est[p.strain];
+  const status=s.colorless?`<span class="tag">Colorless · dead end</span>`:isMono(s)?`<span class="tag">wild</span>`:e&&e.done?`<span class="tag ok">Established</span>`:`<span class="tag warn">not Established</span>`;
+  return `<tr><td><label class="row" style="gap:6px"><input type="checkbox" data-pick="${p.id}" ${(UI.crossPick||[]).includes(p.id)?"checked":""} ${canParent(s)?"":"disabled"}>${strainTxt(p.strain)} ${mutTxt(p.muts)}</label><div class="tiny muted">${esc(kwText(s))}</div></td>
+   <td>${status}</td><td class="small">${p.buds} buds</td>
+   <td class="row" style="gap:4px"><button class="btn sm" data-act="poolharvest" data-id="${p.id}" ${atHome()&&harvestable(s)?"":"disabled"}>Harvest (15 min)</button><button class="btn sm ghost" data-act="release" data-id="${p.id}">Release</button></td></tr>`;
+}
+VIEWS.pool=()=>{
+  const pk=(UI.crossPick||[]).map(id=>S.pool.find(p=>p.id===id)).filter(Boolean);
+  const why=pk.length===2?crossCheck(pk[0],pk[1]):null,rec=pk.length===2&&!why?recipeFor(pk[0].strain,pk[1].strain):null;
+  const knownRec=rec&&S.codex.recipes[rec.id];
+  let preview="";
+  if(pk.length===2)preview=why?`<span class="cr-minus small">${esc(why)}</span>`:`<span class="small">${ST(pk[0].strain).name} × ${ST(pk[1].strain).name} → ${knownRec?`<b>${esc(rec.name)}</b> (${affName(rec.colors)})`:`${pips([...new Set([...ST(pk[0].strain).colors,...ST(pk[1].strain).colors])])} <i>an untried pair</i> — a recipe, or a Colorless dead end`}</span>`;
+  const prog=Object.entries(S.est).map(([id,e])=>[ST(id),e]).filter(([s])=>s).sort((a,b)=>a[1].done-b[1].done||a[0].colors.length-b[0].colors.length);
+  const jeff=jeffHere();
+  return `${dbBanner()}<div class="grid g2"><div class="grid">
+   <div class="panel"><h3>The tide pool nursery <span class="meta">${S.pool.length}/${poolCap()} plants</span></h3>
+    <p class="small muted">Rock pools at the foot of the cliff, with a seawater gate and a mana feed so crosses take. Keep a plant whole when you harvest it at sea and it settles here when you dock. A cross uses up both parents. Only wild (mono) and Established strains can be parents.</p>
+    <div class="row" style="margin:6px 0 10px"><span class="tag ${jeff?"ok":""}">${jeff?"🦈 Jeff is napping by the pool today":"Jeff isn't here today"}</span>${eff("sharkSupervisor")?`<span class="tiny muted">Shark Supervisor: ${jeff?"+1% mutation chance and +5% progress on crosses today":"works on days Jeff naps here"}</span>`:""}</div>
+    ${S.pool.length?`<div class="tscroll"><table><tr><th>Plant <span class="tiny muted">(tick two to cross)</span></th><th>Status</th><th>Yield</th><th></th></tr>${S.pool.map(poolPlantRow).join("")}</table></div>`:`<div class="empty">The pool is empty. At sea, harvest a plant and tap “Keep it whole”.</div>`}
+    <hr class="rule"><div class="row between"><div>${preview||`<span class="small muted">Tick two plants to cross them.</span>`}</div>
+     <button class="btn brass" data-act="cross" ${pk.length===2&&!why&&atHome()?"":"disabled"}>Cross (${fmtDur(crossTime())})</button></div>
+    ${S.tankPlants.length?`<p class="small" style="margin-top:8px"><b>${plural(S.tankPlants.length,"whole plant")}</b> in the harvest tanks: ${S.tankPlants.map(p=>ST(p.strain).name).join(", ")}${atHome()?" — waiting for room in the pool.":" — they settle here when you dock."}</p>`:""}
+   </div></div>
+   <div class="grid">
+    <div class="panel"><h3>Breeding progress</h3>
+     <p class="tiny muted">Each cross on a recipe adds ${cfg().crossPct}%${eff("crossProgress")?` +${eff("crossProgress")}% (Patient Pollinator)`:""}. At 100% the strain is Established: it can be sold, enters the wild as Scarce, and every 5 more crosses spread it one level wider. Before then, the child plant goes back to the sea.</p>
+     ${prog.length?`<table>${prog.map(([s,e])=>`<tr><td>${strainTxt(s.id)}<div class="tiny muted">${S.codex.recipes[s.id]?`${ST(s.recipe[0]).name} × ${ST(s.recipe[1]).name}`:""}</div></td><td style="min-width:110px">${e.done?`<span class="tag ok">Established</span><div class="tiny muted">${SPREADS[e.spread]}${e.spread>SPREAD_FLOOR[tierOf(s)]?` · ${e.since||0}/5 to spread`:""}</div>`:`<div class="bar" style="height:6px"><i style="width:${e.progress}%"></i></div><div class="tiny muted">${e.progress}%</div>`}</td></tr>`).join("")}</table>`:`<p class="empty">No recipes found yet. Try crossing two wild strains of different colors — Low Tide × Glasswater is a good start.</p>`}</div>
+    <div class="panel"><h3>Mutations <span class="meta">${Object.keys(S.mutations).length}/${Object.keys(MUTATIONS).length}</span></h3>
+     <p class="tiny muted">Each cross has a ${cfg().mutCrossPct+eff("crossMut")}% chance to roll a mutation${eff("crossMut")?" (Green Thumb included)":""}. New ones join her list; repeats raise a tier, up to III. About ${cfg().mutWildPct}% of wild plants roll one from her list, at its current tier.</p>
+     ${Object.keys(S.mutations).length?Object.entries(S.mutations).map(([m,t])=>`<span class="tag mut" title="${esc(MUTATIONS[m])}">${m} ${ROMAN[t]}</span>`).join(" "):`<p class="empty">None discovered yet.</p>`}</div>
    </div></div>`;
 };
 
 /* ---------- HALLMARK'S ---------- */
+function partRow(k){
+  const t=partTier(k),tooled=isTooled(k);
+  return `<tr><td class="small"><b>${esc(partLabel(k))}</b> <span class="tiny muted">${cr(unitPrice(k))}</span></td><td class="small">${bin(k)}</td>
+   <td>${tooled?partPacks(k).map(pk=>`<button class="btn sm ${pk==="single"?"ghost":""}" data-act="buypart" data-k="${esc(k)}" data-pk="${pk}">${JAR_PACKS[pk].label}: ${cr(partPackPrice(k,pk))}</button>`).join(" "):`<button class="btn sm brass" data-act="tool" data-k="${esc(k)}">Tool the design — ${cr(r2(TOOLING_FEE*(1-hmDiscount()/100)))}</button>`}</td></tr>`;
+}
 VIEWS.hallmark=()=>{
   const d=hmDiscount();
-  return `<div class="grid g2"><div class="panel"><h3>Hallmark's Craftsmen &amp; Co. — Catalogue</h3>
-   <p class="small muted">Finn designed every part; Hallmark's makes them only for her. Parcels arrive on the receiving circle by sending circle, 2–4 days after ordering. Ordering takes 5 minutes.${d?` Bulk Buyer: ${d}% off.`:""}</p>
-   <h4>Glintworks jars</h4><p class="tiny muted">Glass, with a Glintworks lid and the whale shark pressed into the seal. A mana pulse vacuum-seals each one, so a sealed jar never loses freshness.</p>
+  return `<div class="grid g2"><div class="grid"><div class="panel"><h3>Hallmark's Craftsmen &amp; Co. — Catalogue</h3>
+   <p class="small muted">Finn designed every part; Hallmark's makes them only for her. A new part design costs a one-time ${cr(TOOLING_FEE)} tooling fee. Parcels arrive on the receiving circle 2–4 days after ordering; ordering takes 5 minutes.${d?` Bulk Buyer: ${d}% off.`:""}</p>
+   <h4>Glintworks jars</h4>
    <div class="tscroll"><table><tr><th>Jar</th>${Object.values(JAR_PACKS).map(p=>`<th>${p.label}${p.off?` (−${p.off*100}%)`:""}</th>`).join("")}</tr>
    ${Object.entries(JARS).map(([k,J])=>`<tr><td><b>${J.label}</b> <span class="tiny muted">${J.buds} buds</span></td>${Object.keys(JAR_PACKS).map(pk=>`<td><button class="btn sm ${pk==="single"?"ghost":""}" data-act="buyjar" data-size="${k}" data-pk="${pk}">${cr(jarPackPrice(k,pk))}</button></td>`).join("")}</tr>`).join("")}</table></div>
-   <hr class="rule"><h4>Equipment</h4>
-   <div class="row"><button class="btn brass" data-act="buyrack">Mana drying rack — ${cr(r2(cfg().rackPrice*(1-d/100)))}</button><span class="small muted">Holds ${rackCap()} buds. You have ${rackCount()}.</span></div>
-   <div class="row" style="margin-top:6px"><button class="btn brass" data-act="buyhumidor">Humidor — ${cr(r2(cfg().humidorPrice*(1-d/100)))}</button><span class="small muted">Cedar-lined, ${cfg().humidorCap+eff("humidorSpace")} buds each. You have ${humidorCount()} (${humidorCap()} buds).</span></div>
-   <p class="tiny muted" style="margin-top:10px">Pen parts, cartridge shells, mana cores and flavor bottles join the catalogue in the next update.</p></div>
-   <div class="panel"><h3>Parts bins <span class="meta">${binsUsed()}/${binCap()}</span></h3>
-    <table>${Object.entries(JARS).map(([k,J])=>`<tr><td>${J.label}</td><td><b>${S.bins[k]||0}</b></td></tr>`).join("")}</table>
+   <h4 style="margin-top:12px">Cartridges &amp; cores</h4>
+   <div class="tscroll"><table>${["shell","core"].map(partRow).join("")}</table></div>
+   <p class="tiny muted">A cartridge uses ${budsPerCart()} buds and a shell; a refill reuses the customer's shell. Every pen needs one standard mana core.</p>
+   ${TIER_KEYS.map(t=>`<h4 style="margin-top:12px">${PEN_TIERS[t].label} pen parts <span class="tiny muted">pen sells for ${cr(PEN_TIERS[t].price)}${t==="decorative"?" and up":""}</span></h4>
+    <div class="tscroll"><table>${Object.keys(PART_DESIGNS).flatMap(kind=>(PART_DESIGNS[kind][t]||[]).map(n=>partRow(partKey(kind,n)))).join("")}</table></div>`).join("")}
+   <p class="tiny muted">Decorative parts come as singles only — finer work, made to order.</p>
+  </div></div>
+  <div class="grid">
+   <div class="panel"><h3>Flavor Solutions <span class="meta">${bottlesOwned()}/${FLAVOR_RACK} bottles</span></h3>
+    <p class="tiny muted">One drop flavors a cartridge (+5 Cr; ${HOUSE_BLEND} +8 Cr, mixed from one Peach and one Mango drop).${eff("flavorDrops")?` Flavor Chemist: +${eff("flavorDrops")} drops per bottle.`:""}</p>
+    <div class="tscroll"><table><tr><th>Flavor</th>${Object.values(BOTTLES).map(b=>`<th>${b.label} (${b.drops})</th>`).join("")}</tr>
+    ${FLAVORS.map(f=>`<tr><td class="small"><b>${f}</b> <span class="tiny muted">${dropsOf(f)} drops</span></td>${Object.entries(BOTTLES).map(([k,b])=>`<td><button class="btn sm ghost" data-act="buybottle" data-f="${esc(f)}" data-size="${k}" ${bottlesOwned()<FLAVOR_RACK?"":"disabled"}>${cr(r2(b.price*(1-d/100)))}</button></td>`).join("")}</tr>`).join("")}</table></div></div>
+   <div class="panel"><h3>Equipment</h3>
+    <div class="row"><button class="btn brass" data-act="buyrack">Mana drying rack — ${cr(r2(cfg().rackPrice*(1-d/100)))}</button><span class="small muted">Holds ${rackCap()} buds. You have ${rackCount()}.</span></div>
+    <div class="row" style="margin-top:6px"><button class="btn brass" data-act="buyhumidor">Humidor — ${cr(r2(cfg().humidorPrice*(1-d/100)))}</button><span class="small muted">Cedar-lined, ${cfg().humidorCap+eff("humidorSpace")} buds each. You have ${humidorCount()} (${humidorCap()} buds).</span></div></div>
+   <div class="panel"><h3>Parts bins <span class="meta">${binsUsed()}/${binCap()}</span></h3>${binTable()}
     ${S.deliveries.length?`<h4 style="margin-top:10px">On the way</h4><table>${S.deliveries.map(x=>`<tr><td class="small">${esc(x.label)}</td><td class="small muted">${cr(x.cost)}</td><td class="small">arrives ${fmtShort(x.arrive)}</td></tr>`).join("")}</table>`:`<p class="empty">No parcels on the way.</p>`}
-    <p class="tiny muted">The bin count includes parcels on the way, so an order can't overfill the bins.</p></div></div>`;
+    <p class="tiny muted">The bin count includes parcels on the way, so an order can't overfill the bins.</p></div></div></div>`;
 };
 
 /* ---------- ORDERS ---------- */
+function srcPicker(o,i,req,need){
+  const c=sources(req,need);
+  return c.length?`<select data-src="${o.id}" data-i="${i}" style="max-width:100%">${c.map(x=>`<option value="${x[0]}:${x[1].id}">${esc(srcLabel(x))}</option>`).join("")}</select>`:null;
+}
+const flavorLine=f=>f?`flavored <b>${esc(f)}</b>`:"no flavor";
 function itemHTML(o,it,i,offer){
-  const J=JARS[it.size];let body="";
-  if(!offer&&o.stage==="filling"){
-    if(it.fill)body=`<div class="row between"><span class="small">Sealed: ${strainTxt(it.fill.strain)} ${mutTxt(it.fill.muts)} · ${it.fill.fresh}% fresh</span><a href="#" class="small muted" data-act="unjar" data-o="${o.id}" data-i="${i}">Unpack</a></div>`;
-    else{const c=sources(it),have=S.bins[it.size]||0;
-      body=c.length?`<div class="row"><select data-src="${o.id}" data-i="${i}" style="max-width:100%">${c.map(x=>`<option value="${x[0]}:${x[1].id}">${esc(srcLabel(x))}</option>`).join("")}</select>
-        <button class="btn sm brass" data-act="jar" data-o="${o.id}" data-i="${i}" ${atHome()&&have?"":"disabled"}>Jar it (${fmtDur(jarTime(it.size))})</button></div>${have?"":`<div class="tiny cr-minus">No empty ${J.label.toLowerCase()}s — order some from Hallmark's.</div>`}`
+  const working=!offer&&o.stage==="filling";let body="",reqLine="";
+  if(it.kind==="jar"){
+    reqLine=reqText(it.req);
+    if(working&&!it.fill){const J=JARS[it.size],pk=srcPicker(o,i,it.req,J.buds),have=bin(it.size);
+      body=pk?`<div class="row">${pk}<button class="btn sm brass" data-act="jar" data-o="${o.id}" data-i="${i}" ${atHome()&&have?"":"disabled"}>Jar it (${fmtDur(jarTime(it.size))})</button></div>${have?"":`<div class="tiny cr-minus">No empty ${J.label.toLowerCase()}s — order some from Hallmark's.</div>`}`
         :`<span class="muted tiny">Nothing dried matches yet — ${J.buds} buds needed.</span>`}
+    if(it.fill)body=`<div class="row between"><span class="small">Sealed: ${strainTxt(it.fill.strain)} ${mutTxt(it.fill.muts)} · ${it.fill.fresh}% fresh</span>${working?`<a href="#" class="small muted" data-act="unjar" data-o="${o.id}" data-i="${i}">Unpack</a>`:""}</div>`;
+  }else if(it.kind==="cart"||it.kind==="refill"){
+    reqLine=`${reqText(it.req)} · ${flavorLine(it.flavor)}`;
+    if(working&&!it.fill)body=cartFiller(o,it,i);
+    if(it.fill)body=`<span class="small">${it.kind==="refill"?"Refilled":"Filled"}: ${strainTxt(it.fill.strain)} ${mutTxt(it.fill.muts)} · ${it.fill.fresh}% fresh${it.fill.flavor?` · ${esc(it.fill.flavor)}`:""}</span>`;
+  }else{
+    const spec=Object.entries(it.spec||{}).filter(([,v])=>v).map(([k,v])=>partLabel(partKey(k,v)));
+    reqLine=`${spec.length?`${esc(spec.join(", "))} <span class="tiny muted">(+2 Cr each)</span>`:`<span class="muted">any ${it.tier} parts</span>`}<div class="small" style="margin-top:2px">Included cartridge: ${reqText(it.cart.req)} · ${flavorLine(it.cart.flavor)}</div>`;
+    if(working){
+      if(!it.fill)body=`<div class="tiny muted" style="margin-bottom:3px">1. Fill the cartridge</div>${cartFiller(o,it,i)}`;
+      else if(!it.fill.done){
+        const c=it.fill.cart;
+        body=`<div class="small">✓ Cartridge: ${strainTxt(c.strain)} · ${c.fresh}%${c.flavor?` · ${esc(c.flavor)}`:""}</div><div class="tiny muted" style="margin:4px 0 3px">2. Assemble</div><div class="row">`+
+         penKinds(it.tier).map(k=>{const opts=penOptions(it,k);const want=it.spec&&it.spec[k];
+           if(!opts.length){const key=want?partKey(k,want):null;return `<span class="tiny cr-minus">No ${want?esc(partLabel(key).toLowerCase()):it.tier+" "+PART_KINDS[k].toLowerCase()}${key&&!isTooled(key)?` — <a href="#" data-act="tool" data-k="${esc(key)}">tool it</a>`:""}</span>`}
+           return `<select data-part="${o.id}" data-i="${i}" data-kind="${k}">${opts.map(x=>`<option value="${esc(x)}">${esc(partLabel(x))} (${bin(x)})</option>`).join("")}</select>`}).join("")+
+         `<button class="btn sm brass" data-act="assemble" data-o="${o.id}" data-i="${i}" ${atHome()&&bin("core")>0&&penKinds(it.tier).every(k=>penOptions(it,k).length)?"":"disabled"}>Assemble (${fmtDur(penTime(it.tier))})</button></div>${bin("core")?"":`<div class="tiny cr-minus">No mana cores.</div>`}`;
+      }
+    }
+    if(it.fill&&it.fill.done)body=`<span class="small">✓ ${esc(Object.values(it.fill.parts).map(partLabel).join(", "))} · cartridge: ${esc(ST(it.fill.cart.strain).name)}${it.fill.cart.flavor?`, ${esc(it.fill.cart.flavor)}`:""}</span>`;
   }
-  if(!offer&&o.stage!=="filling"&&it.fill)body=`<span class="small">${strainTxt(it.fill.strain)} ${mutTxt(it.fill.muts)} · ${it.fill.fresh}% fresh</span>`;
-  const pass=!offer&&!!it.fill;
-  return `<div class="slot ${pass?"pass":""}"><div class="row between"><span class="lbl">${J.label} · ${J.buds} buds</span>${offer?"":pass?`<span class="tag ok">sealed</span>`:`<span class="tag no">open</span>`}</div>
-   <div class="req">${reqText(it.req)}</div>${body?`<div style="margin-top:5px">${body}</div>`:""}</div>`;
+  const pass=!offer&&itemDone(it);
+  const pref=it.pref?`<span class="tag mut" title="Meeting it pays +${cfg().prefPct}% on this item">${esc(it.pref)} preferred${!offer&&cartOrLot(it)?(prefMet(it)?" ✓":" ✗"):""}</span>`:"";
+  const lbl=it.kind==="jar"?`${JARS[it.size].label} · ${JARS[it.size].buds} buds`:it.kind==="cart"?`Cartridge · ${budsPerCart()} buds`:it.kind==="refill"?`Refill · returned cartridge`:`${PEN_TIERS[it.tier].label} pen`;
+  return `<div class="slot ${pass?"pass":""}"><div class="row between"><span class="lbl">${lbl}</span><span class="row" style="gap:4px">${pref}${offer?"":pass?`<span class="tag ok">done</span>`:`<span class="tag no">open</span>`}</span></div>
+   <div class="req">${reqLine}</div>${body?`<div style="margin-top:5px">${body}</div>`:""}</div>`;
+}
+function cartFiller(o,it,i){
+  const req=itemReq(it),fl=itemFlavor(it),need=budsPerCart(),refill=it.kind==="refill",pk=srcPicker(o,i,req,need);
+  const okShell=refill||bin("shell")>0,okFl=!fl||hasFlavor(fl);
+  if(!pk)return `<span class="muted tiny">Nothing dried matches yet — ${need} buds needed.</span>`;
+  return `<div class="row">${pk}<button class="btn sm brass" data-act="fillcart" data-o="${o.id}" data-i="${i}" ${atHome()&&okShell&&okFl?"":"disabled"}>${refill?"Refill":"Extract & fill"} (${fmtDur(extractTime())})</button></div>
+   ${okShell?"":`<div class="tiny cr-minus">No cartridge shells — order some from Hallmark's.</div>`}${okFl?"":`<div class="tiny cr-minus">Out of ${esc(fl)} — order Flavor Solution from Hallmark's.</div>`}`;
 }
 function orderCard(o,offer){
   const f=FAC[o.faction],p=priceOf(o,!offer),stages=["filling","packed"],si=stages.indexOf(o.stage);
   const urgent=o.urgent?`<span class="tag urgent">Urgent +${cfg().urgentPct}%${offer?` · ${o.urgentDays}-day deadline`:o.missed?" — missed":` · due ${fmtShort(o.deadline)}`}</span>`:"";
+  const kindTag=o.kind==="refill"?`<span class="tag">refill</span>`:"";
   let foot;
   if(offer){
     foot=`<div class="row between"><div><div class="muted tiny">Quoted</div><div class="price">${cr(o.quote)}</div><div class="muted tiny">Offer expires end of ${fmtShort(o.expires)} · ${rpOf(o)} RP</div></div>
      <div class="row"><button class="btn" data-act="accept" data-o="${o.id}" ${S.orders.length>=orderCap()?"disabled title='Order cap reached'":""}>Accept</button><button class="btn ghost" data-act="decline" data-o="${o.id}">Pass</button></div></div>`;
   }else{
-    const all=o.items.every(it=>it.fill);
+    const all=o.items.every(itemDone);
     const btns=o.stage==="filling"?`<button class="btn brass" data-act="pack" data-o="${o.id}" ${all&&atHome()?"":"disabled"}>Pack (15 min)</button>`
       :`<button class="btn end" data-act="send" data-o="${o.id}" ${atHome()?"":"disabled"}>Send parcel (5 min)</button>`;
     const rp=rpOf(o,true);
@@ -1629,11 +2046,11 @@ function orderCard(o,offer){
      <details class="small" style="margin-top:6px"><summary>Price breakdown</summary><table>${p.lines.map(([l,v])=>`<tr><td>${esc(l)}</td><td>${cr(v)}</td></tr>`).join("")}
       ${p.urgentFee?`<tr><td>Urgent</td><td>${cr(p.urgentFee)}</td></tr>`:""}
       <tr><td><b>Total</b></td><td><b>${cr(p.total)}</b></td></tr><tr><td>Referral to faction</td><td>−${cr(p.referral)}</td></tr><tr><td>Krakoan Trade Levy</td><td>−${cr(p.levy)}</td></tr><tr><td><b>You keep</b></td><td><b>${cr(p.net)}</b></td></tr></table>
-      <p class="tiny muted">Each jar is its buds × the strain's price per bud (+10% per mutation tier) × freshness, plus the jar.</p></details>
+      <p class="tiny muted">Jar: buds × price per bud × freshness + the jar. Cartridge: 3 × price per bud × freshness + 2 Cr (+5 Cr flavored, +8 Cr ${HOUSE_BLEND}); refills are 20% off. Pen: tier price + 2 Cr per named part + its cartridge. Mutations add 10% per tier; a met preference adds ${cfg().prefPct}%.</p></details>
      ${o.stage==="filling"?`<div style="margin-top:6px"><a href="#" class="small muted" data-act="abandon" data-o="${o.id}">Cancel order</a></div>`:""}`;
   }
   return `<article class="wo"><div class="wo-h"><div class="fac">${esc(f.name)}</div><h4>${esc(o.title)}</h4>
-    <div class="small muted">from <b>${esc(o.who)}</b>${o.planes&&o.planes.length?` · ${esc(o.planes.join(", "))}`:""}</div>${urgent?`<div class="row" style="margin-top:3px">${urgent}</div>`:""}
+    <div class="small muted">from <b>${esc(o.who)}</b>${o.planes&&o.planes.length?` · ${esc(o.planes.join(", "))}`:""}</div>${urgent||kindTag?`<div class="row" style="margin-top:3px">${urgent}${kindTag}</div>`:""}
     ${o.line?`<p class="quote">“${esc(o.line)}”</p>`:""}</div>
     <div class="wo-b">${o.items.map((it,i)=>itemHTML(o,it,i,offer)).join("")}</div><div class="wo-f">${foot}</div></article>`;
 }
@@ -1772,7 +2189,7 @@ function dbProblems(){
 const MASTERY_ROMAN=["","I","II","III","IV","V"];
 function strainCard(s){
   const f=S.codex.found[s.id],est=S.est[s.id];
-  const knownBred=!isMono(s)&&est&&est.done;
+  const knownBred=!isMono(s)&&((est&&est.done)||S.codex.recipes[s.id]);
   if(!f&&!knownBred)return `<div class="strain unknown"><div class="row between"><span class="nm">????</span>${pips(s.colors)}</div><div class="tiny muted">${tierOf(s)} · ${rarityOf(s)}${s.colorless?" · only from crosses with no recipe":isMono(s)?" · found in the wild":" · bred in the tide pool"}</div></div>`;
   const sold=S.sold[s.id]||0,lv=S.mastery[s.id]||0,next=MASTERY[lv];
   const spread=spreadIdx(s);
@@ -1780,6 +2197,7 @@ function strainCard(s){
    <div class="row" style="margin:3px 0">${rarTag(rarityOf(s))}<span class="tag">${tierOf(s)}</span>${spread>=0?`<span class="tag">${SPREADS[spread]}</span>`:""}<span class="small"><b>${cr(budPrice(s.id))}</b>/bud</span></div>
    <div class="small">${s.keywords.map(k=>`<span title="${esc((DB.keywords[k.k]||{}).text||"")}"><b>${esc(k.k)} ${k.x}</b></span>`).join(" · ")}</div>
    <div class="fl">“${esc(s.flavor||"")}”</div>
+   ${s.recipe?`<div class="small" style="margin-top:4px">Recipe: ${S.codex.recipes[s.id]?`${esc(ST(s.recipe[0]).name)} × ${esc(ST(s.recipe[1]).name)}`:"<span class='muted'>unknown</span>"}${est&&!est.done?` · ${est.progress}% to Established`:""}</div>`:""}
    <div class="tiny muted" style="margin-top:4px">Inspired by ${esc(s.inspiredBy||"—")}${f?` · found ${fmtShort(f)}`:""}</div>
    <div class="row between tiny" style="margin-top:6px"><span>Mastery ${lv?MASTERY_ROMAN[lv]:"—"}</span><span class="muted">${sold} buds sold${next?` / ${next[0]}`:""}</span></div>
    <div class="bar brass" style="height:5px"><i style="width:${next?Math.min(100,sold/next[0]*100):100}%"></i></div></div>`;
@@ -1790,7 +2208,7 @@ VIEWS.codex=()=>{
   if(c==="strains"){
     if(!DB.strains.length)return `${tabs}<div class="panel empty">No strains.json loaded.</div>`;
     const q=UI.cxQ.toLowerCase();
-    const known=s=>S.codex.found[s.id]||(S.est[s.id]&&S.est[s.id].done);
+    const known=s=>S.codex.found[s.id]||(S.est[s.id]&&S.est[s.id].done)||S.codex.recipes[s.id];
     const tiers=["Base","Hybrid","Elite","Crown","Apex","Colorless"];
     const list=DB.strains.filter(s=>(!UI.cxTier||tierOf(s)===UI.cxTier)&&(!q||(known(s)&&(s.name.toLowerCase().includes(q)||kwText(s).toLowerCase().includes(q)))));
     const found=DB.strains.filter(s=>!s.colorless&&known(s)).length,all=DB.strains.filter(s=>!s.colorless).length;
@@ -1805,7 +2223,7 @@ VIEWS.codex=()=>{
   }
   if(c==="mutations"){
     return `${tabs}<div class="panel"><h3>Mutations <span class="meta">${Object.keys(S.mutations).length} of ${Object.keys(MUTATIONS).length} discovered</span></h3>
-     <p class="small muted">Traits that can land on any strain. They change how it feels, never how strong it is; each tier adds +10% to price. They're discovered only by crossing in the tide pool (next update), then about ${cfg().mutWildPct}% of wild plants roll one from her list.</p>
+     <p class="small muted">Traits that can land on any strain. They change how it feels, never how strong it is; each tier adds +10% to price. They're discovered only by crossing in the tide pool, then about ${cfg().mutWildPct}% of wild plants roll one from her list.</p>
      <table>${Object.entries(MUTATIONS).map(([k,v])=>S.mutations[k]?`<tr><td><span class="tag mut">${k} ${ROMAN[S.mutations[k]]}</span></td><td class="small">${esc(v)}</td></tr>`:`<tr><td><b>????</b></td><td class="small muted">Not discovered yet.</td></tr>`).join("")}</table></div>`;
   }
   if(c==="clients"){
@@ -1859,8 +2277,8 @@ function snapshotMD(){
   for(const o of S.orders){
     P(`### ${o.title}`);
     P(`${FAC[o.faction].name}, from ${o.who}${o.planes&&o.planes.length?` (${o.planes.join(", ")})`:""}. Accepted ${fmtShort(o.accepted)}.${o.urgent?(o.missed?" Urgent — deadline missed.":` Urgent, due ${fmtShort(o.deadline)}.`):""}${o.line?` Note: “${o.line}”`:""}`);
-    for(const it of o.items)P(`- ${JARS[it.size].label} (${JARS[it.size].buds} buds): ${reqText(it.req,true)} — ${it.fill?`sealed with ${ST(it.fill.strain).name}${Object.keys(it.fill.muts||{}).length?` (${mutPlain(it.fill.muts)})`:""}, ${it.fill.fresh}% fresh`:"not jarred yet"}`);
-    P(`- Stage: ${o.stage==="filling"?"jarring":"packed, ready to send"} · live price ${cr(priceOf(o,true).total)}`);
+    for(const it of o.items){const f=cartOrLot(it);P(`- ${itemShort(it)}${it.kind==="pen"?` (cartridge: ${reqText(it.cart.req,true)}${it.cart.flavor?", "+it.cart.flavor:""})`:""}${it.pref?`, ${it.pref} preferred`:""} — ${itemDone(it)?`done with ${ST(f.strain).name}${Object.keys(f.muts||{}).length?` (${mutPlain(f.muts)})`:""}, ${f.fresh}% fresh`:f?`cartridge filled with ${ST(f.strain).name}, not assembled yet`:"not started"}`)}
+    P(`- Stage: ${o.stage==="filling"?"in the workshop":"packed, ready to send"} · live price ${cr(priceOf(o,true).total)}`);
   }
   if(S.offers.length){P("");P(`## Offers waiting (${S.offers.length})`);
     for(const o of S.offers)P(`- ${o.items.map(itemShort).join(" + ")} — ${FAC[o.faction].name} from ${o.who}${o.planes&&o.planes.length?` (${o.planes.join(", ")})`:""}, quoted ${cr(o.quote)}${o.urgent?", urgent":""}, expires ${fmtShort(o.expires)}`)}
@@ -1870,7 +2288,11 @@ function snapshotMD(){
   S.racks.forEach((r,i)=>P(`- Drying rack ${i+1}: ${r.length?r.map(l=>`${l.buds} ${ST(l.strain).name} (${plural(l.daysLeft,"day")} left)`).join(", "):"empty"}`));
   P(`- ${humidorCount()>1?humidorCount()+" Humidors":"Humidor"} (${humidorUsed()}/${humidorCap()}): ${S.humidor.length?S.humidor.map(l=>`${l.buds} ${ST(l.strain).name}${Object.keys(l.muts||{}).length?` (${mutPlain(l.muts)})`:""}${l.fresh<100?` at ${l.fresh}%`:""}`).join(", "):"empty"}`);
   if(S.loose.length)P(`- Loose, losing freshness: ${S.loose.map(l=>`${l.buds} ${ST(l.strain).name} at ${l.fresh}%`).join(", ")}`);
-  P(`- Parts bins: ${Object.entries(JARS).map(([k,J])=>`${S.bins[k]||0} ${J.label.toLowerCase()}s`).join(", ")}${S.deliveries.length?`; on the way: ${S.deliveries.map(d=>`${d.label} (${fmtShort(d.arrive)})`).join(", ")}`:""}`);
+  P(`- Tide pool (${S.pool.length}/${poolCap()}): ${S.pool.length?S.pool.map(p=>`${ST(p.strain).name}${Object.keys(p.muts||{}).length?` (${mutPlain(p.muts)})`:""}`).join(", "):"empty"}${S.tankPlants.length?`; whole plants in the tanks: ${S.tankPlants.map(p=>ST(p.strain).name).join(", ")}`:""}${jeffHere()?". Jeff is napping by the pool today.":""}`);
+  {const prog=Object.entries(S.est).filter(([id])=>ST(id));if(prog.length)P(`- Breeding: ${prog.map(([id,e])=>`${ST(id).name} ${e.done?`Established (${SPREADS[e.spread]})`:e.progress+"%"}`).join(", ")}`)}
+  P(`- Pens in circulation: ${S.pens.length} (${TIER_KEYS.map(t=>`${S.pens.filter(p=>p.tier===t).length} ${t}`).join(", ")}); ${S.pensSold||0} sold in all.`);
+  P(`- Flavor rack: ${S.flavors.length?[...new Set(S.flavors.map(b=>b.flavor))].map(f=>`${f} ${dropsOf(f)} drops`).join(", "):"empty"}`);
+  P(`- Parts bins: ${Object.keys(S.bins).filter(k=>S.bins[k]).map(k=>`${S.bins[k]} ${BIN_LABEL(k).toLowerCase()}`).join(", ")}${S.deliveries.length?`; on the way: ${S.deliveries.map(d=>`${d.label} (${fmtShort(d.arrive)})`).join(", ")}`:""}`);
   P("");P(`## Nodes`);
   for(const n of visibleNodes()){const rv=revealed(n);P(`- ${cr(tripCost(n))} to reach, ${n.left}/${n.plants} plants left${rv.length?`, tags: ${rv.map(t=>tagLabel(n,t)).join(", ")}`:""}${n.tags.length>rv.length?`, ${plural(n.tags.length-rv.length,"hidden tag")}`:""}${S.location===n.id?" — Finn is here":""}`)}
   P("");P(`## Codex`);
@@ -1979,7 +2401,9 @@ function dayMD(dn){
     ...by("coins").map(e=>`${e.why}: ${cr(e.amount)}`),...by("sister").map(e=>e.text),
     ...by("sink").map(e=>e.life?`The Lucky Landshark sank (${e.why}). A Phoenix Feather was spent; Finn and the boat respawned at the dock with the tanks intact`:`The Lucky Landshark sank (${e.why}) with no feathers left: ${e.lost} wet buds went to Rán, salvage tow ${cr(e.tow)}${e.owed>0?` (${cr(e.owed)} owed)`:""}, boat out for 2 days`),
     ...by("repair").map(e=>`Repaired the hull +${e.pts} (${cr(e.cost)})`),...by("home").map(e=>`Returned home${e.loaded?` and loaded ${e.loaded} wet buds onto the racks`:""}${e.left?` (${e.left} wait in the tanks)`:""}`)]);
-  sec("Glintworks",[...by("dried").map(e=>`Dried overnight: ${e.text}`),...by("jar").map(e=>`Jarred and sealed: ${e.text}`),...by("hallmark").map(e=>`Ordered from Hallmark's: ${e.text}`),...by("parcel").map(e=>`Hallmark's parcel arrived: ${e.text}`)]);
+  sec("Tide pool",[...by("keep").map(e=>`Kept a ${e.name} plant whole for the tide pool`),...by("cross").map(e=>`Crossed ${e.a} × ${e.b} → ${e.child}${e.recipe?` (${e.note})`:" (no recipe — a Colorless dead end)"}${e.muts?`, with ${e.muts}`:""}`),
+    ...by("established").map(e=>`${e.name} became Established`),...by("spread").map(e=>`${e.name} spread to ${e.spread} in the wild`),...by("mutation").map(e=>e.tier===1?`Discovered a new mutation: ${e.name}`:`${e.name} rose to tier ${ROMAN[e.tier]}`)]);
+  sec("Glintworks",[...by("dried").map(e=>`Dried overnight: ${e.text}`),...by("jar").map(e=>`Jarred and sealed: ${e.text}`),...by("extract").map(e=>e.text),...by("pen").map(e=>`Assembled a ${e.text}`),...by("penGone").map(e=>`A ${e.tier} pen owned by ${e.who} ${e.lost?"was lost":"wore out"}`),...by("hallmark").map(e=>`Ordered from Hallmark's: ${e.text}`),...by("parcel").map(e=>`Hallmark's parcel arrived: ${e.text}`)]);
   sec("Orders offered",by("offer").map(e=>`${oline(e)}, quoted ${cr(e.quote)}, expires ${fmtShort(e.expires)}`));
   sec("Orders accepted",by("accept").map(e=>`${oline(e)}, quoted ${cr(e.quote)}${e.deadline?`, due ${fmtShort(e.deadline)}`:""}`));
   sec("Orders delivered",by("deliver").map(e=>`${oline(e)} — ${cr(e.total)}, kept ${cr(e.net)} after referral and levy, +${e.rp} RP${e.missed?" (deadline missed)":""}`));
@@ -2037,8 +2461,9 @@ VIEWS.settings=()=>{
     <h4>Business</h4><div class="row">${num("orderCap","Order cap")}${num("registration","Base dues / month")}${num("duesPerLevel","+ dues per Rep Level")}${num("referral","Referral %")}${num("urgentPct","Urgent %")}${num("urgentChance","Urgent chance %")}${num("levyPct","Trade Levy %")}${num("permit","Interplanar permit / yr")}${num("exportPermit","Export permit / yr")}${num("upkeep","Boat upkeep / month")}${num("ppPct","Perk Points % of sales")}${num("packBase","First pack (PP)")}${num("packStep","+ PP per pack bought")}</div>
     <h4 style="margin-top:8px">Sea &amp; Glint</h4><div class="row">${num("tankCap","Harvest tanks")}${num("discoveryPct","New strain chance %")}${num("mutWildPct","Wild mutation %")}${num("maxHull","Max Hull")}${num("hullRepair","Daily repair")}${num("repairCost","Repair Cr/point")}${num("salvageTow","Salvage tow")}</div>
     <h4 style="margin-top:8px">Workshop</h4><div class="row">${num("rackCap","Buds per rack")}${num("startRacks","Starting racks")}${num("rackPrice","Rack price")}${num("humidorCap","Buds per Humidor")}${num("humidorPrice","Humidor price")}${num("binCap","Parts bins")}${num("dryMana","Drying mana / rack / night",.1)}${num("sealMana","Seal mana / jar",.05)}${num("freshGrace","Fresh days (loose)")}${num("freshLoss","Freshness loss %/day")}${num("deliverMin","Delivery min days")}${num("deliverMax","Delivery max days")}</div>
+    <h4 style="margin-top:8px">Tide pool &amp; pens</h4><div class="row">${num("poolCap","Tide pool plants")}${num("crossPct","Progress per cross %")}${num("mutCrossPct","Cross mutation %")}${num("jeffPct","Jeff naps here %")}${num("extractMana","Extraction mana",.1)}${num("addonPct","Pen add-on chance %")}${num("refillUnlock","Pens before refills")}${num("refillPct","Refill % per pen/day",.5)}${num("refillCap","Refills per day")}${num("penLoss","Pen lost %/day",.1)}${num("replacePct","Replacement %")}${num("prefPct","Preference bonus %")}</div>
     <h4 style="margin-top:8px">Lives</h4><div class="row">${num("livesCap","Feather cap")}${num("lifeCost","Feather price")}</div>
-    <p class="tiny muted" style="margin-top:8px">* The 10 small jars, 10 jars and 2 extra large jars Finn opens with are a placeholder for the doc's "opening stock".</p>
+    <p class="tiny muted" style="margin-top:8px">* Opening stock is a placeholder for the doc's "a crate of mana cores, jars, flavor bottles": 50 mana cores, 20 cartridge shells, 10 brass bodies, 10 plain mouthpieces, 10 small jars, 10 jars, 2 extra large jars, and a standard bottle each of Peach and Mango. Part prices, shells (0.5 Cr), Jeff's 40% and the Peach + Mango drops for ${HOUSE_BLEND} are placeholders too.</p>
    </div></div></div>`;
 };
 
@@ -2057,6 +2482,11 @@ document.addEventListener("click",e=>{
    case"sail":sail(id);break; case"harvest":harvest();break; case"home":returnHome();break;
    case"loadracks":loadRacksNow();break; case"dumptank":dumpTank(id);break;
    case"tohumidor":looseToHumidor(id);break; case"discard":discardLot(t.dataset.where,id);break;
+   case"keepwhole":keepWhole();break; case"poolharvest":harvestPool(id);break; case"release":releasePlant(id);break;
+   case"cross":{const pk=UI.crossPick||[];if(pk.length===2){UI.crossPick=[];cross(pk[0],pk[1])}break}
+   case"tool":toolPart(t.dataset.k);break; case"buypart":orderPart(t.dataset.k,t.dataset.pk);break; case"buybottle":orderBottle(t.dataset.f,t.dataset.size);break;
+   case"fillcart":{const sel=document.querySelector(`select[data-src="${o}"][data-i="${i}"]`);fillCart(o,i,sel?sel.value:null);break}
+   case"assemble":{const ch={};document.querySelectorAll(`select[data-part="${o}"][data-i="${i}"]`).forEach(s=>ch[s.dataset.kind]=s.value);assemblePen(o,i,ch);break}
    case"buyjar":orderJars(t.dataset.size,t.dataset.pk);break; case"buyrack":orderRack();break; case"buyhumidor":orderHumidor();break;
    case"accept":accept(o);break; case"decline":decline(o);break; case"abandon":abandon(o);break;
    case"jar":{const sel=document.querySelector(`select[data-src="${o}"][data-i="${i}"]`);jarItem(o,i,sel?sel.value:null);break}
@@ -2096,6 +2526,7 @@ document.addEventListener("change",e=>{
   const t=e.target;
   if(t.dataset.cfg){S.config[t.dataset.cfg]=+t.value;commit();return}
   if(t.dataset.equip){equipCard(t.dataset.equip,+t.value);return}
+  if(t.dataset.pick){let pk=(UI.crossPick||[]).filter(x=>S.pool.some(p=>p.id===x));if(t.checked){pk.push(t.dataset.pick);if(pk.length>2)pk=pk.slice(-2)}else pk=pk.filter(x=>x!==t.dataset.pick);UI.crossPick=pk;render();return}
   if(t.dataset.patron){const c=S.cards[t.dataset.patron];if(c){c.faction=t.value;addLog(`Patron's Favor now favors ${FAC[t.value].name}.`);commit()}return}
   if(t.dataset.cx){UI[t.dataset.cx]=t.value;render();return}
   if(t.dataset.pay){const r=(S.payroll||[]).find(x=>x.id===t.dataset.pay),f=t.dataset.f;if(!r)return;
