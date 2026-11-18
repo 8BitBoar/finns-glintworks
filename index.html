@@ -321,7 +321,7 @@ const EFFECT_TEXT={
  colorW:"Shallows tags +{t}% likelier; White strains +{v} bud per plant",colorU:"Reef tags +{t}% likelier; Blue strains +{v} bud per plant",
  colorB:"Wreck tags +{t}% likelier; Black strains +{v} bud per plant",colorR:"Vent tags +{t}% likelier; Red strains +{v} bud per plant",
  colorG:"Kelp Forest tags +{t}% likelier; Green strains +{v} bud per plant",
- rackBuds:"+{v} buds per drying rack",humidorSpace:"+{v} Humidor space",binSpace:"+{v} parts bin space",freshDays:"Loose buds keep full freshness +{v} day",
+ rackBuds:"+{v} buds per drying rack",humidorSpace:"+{v} space in every Humidor",binSpace:"+{v} parts bin space",freshDays:"Loose buds keep full freshness +{v} day",
  sealTime:"Jarring takes {v} min less (minimum 1)",bottomlessHorn:"No late-work penalty after 9 PM",extraRack:"+{v} drying rack",orderChance:"+{v}% daily order chance per faction",
  orderCap:"+{v} active order cap",bulkBuyer:"{v}% off Hallmark's",patronRP:"+{v} RP per order with one chosen faction",rushDays:"Urgent order deadlines +{v} day",
  collectorsEye:"Mutations add +{v}% more to price per tier",livesCap:"+{v} to the lives cap",tidewright:"Established strains dry {v} day faster (minimum 1)",
@@ -374,7 +374,7 @@ const DEFAULT_CONFIG={
  orderCap:3, registration:20, duesPerLevel:5, referral:5, urgentPct:50, urgentChance:15, prefPct:10,
  levyPct:5, royaltyPct:10, permit:100, exportPermit:150, upkeep:50,
  maxHull:100, hullRepair:20, repairCost:2, salvageTow:500, salvageDays:2, respawnHull:50,
- tankCap:100, rackCap:50, startRacks:2, rackPrice:25, humidorCap:200, binCap:200,
+ tankCap:100, rackCap:50, startRacks:2, rackPrice:25, humidorCap:200, humidorPrice:150, binCap:200,
  dryMana:1, sealMana:.1, freshGrace:3, freshLoss:5,
  discoveryPct:5, mutWildPct:2, mutCrossPct:5,
  ppPct:10, packBase:25, packStep:5,
@@ -571,7 +571,8 @@ const tankUsed=()=>S.tank.reduce((a,l)=>a+l.buds,0);
 const rackCap=()=>cfg().rackCap+eff("rackBuds");
 const rackCount=()=>cfg().startRacks+(S.racksBought||0)+eff("extraRack");
 const rackUsed=r=>r.reduce((a,l)=>a+l.buds,0);
-const humidorCap=()=>cfg().humidorCap+eff("humidorSpace");
+const humidorCount=()=>1+(S.humidorsBought||0);
+const humidorCap=()=>humidorCount()*(cfg().humidorCap+eff("humidorSpace")); // Bigger Humidor adds to every Humidor
 const humidorUsed=()=>S.humidor.reduce((a,l)=>a+l.buds,0);
 const binCap=()=>cfg().binCap+eff("binSpace");
 const binsUsed=()=>Object.values(S.bins).reduce((a,b)=>a+b,0)+S.deliveries.reduce((a,d)=>a+Object.values(d.jars||{}).reduce((x,y)=>x+y,0),0);
@@ -952,11 +953,18 @@ function orderRack(){
     const d=rint(cfg().deliverMin,cfg().deliverMax);S.deliveries.push({id:nid("p"),arrive:S.clock.day+d,racks:1,label:"Mana drying rack",cost});ev("hallmark",{text:`a mana drying rack (${cr(cost)})`})},
     "Ordered a mana drying rack from Hallmark's — arriving in 2–4 days");
 }
+function orderHumidor(){
+  const cost=r2(cfg().humidorPrice*(1-hmDiscount()/100));
+  act(5,()=>{if(!pay(cost,"Hallmark's — Humidor"))return false;
+    const d=rint(cfg().deliverMin,cfg().deliverMax);S.deliveries.push({id:nid("p"),arrive:S.clock.day+d,humidors:1,label:"Humidor",cost});ev("hallmark",{text:`a Humidor (${cr(cost)})`})},
+    "Ordered a cedar-lined Humidor from Hallmark's — arriving in 2–4 days");
+}
 function nightlyDeliveries(){
   const notes=[];const due=S.deliveries.filter(d=>d.arrive<=S.clock.day);
   for(const d of due){
     for(const [k,v] of Object.entries(d.jars||{}))S.bins[k]=(S.bins[k]||0)+v;
     if(d.racks){S.racksBought=(S.racksBought||0)+d.racks;syncRacks()}
+    if(d.humidors)S.humidorsBought=(S.humidorsBought||0)+d.humidors;
     notes.push(`A Hallmark's parcel appeared on the receiving circle: ${d.label}.`);ev("parcel",{text:d.label});
   }
   S.deliveries=S.deliveries.filter(d=>d.arrive>S.clock.day);
@@ -1547,7 +1555,7 @@ VIEWS.works=()=>{
   return `${dbBanner()}${atHome()?"":`<div class="banner">Finn is out on the water. The racks keep drying, but the workshop is back at the lighthouse.</div>`}
   <div class="grid g2">
    <div class="grid">
-    <div class="panel"><h3>The Humidor <span class="meta">${humidorUsed()}/${humidorCap()} buds</span></h3>
+    <div class="panel"><h3>${humidorCount()>1?`The Humidors <span class="small muted">×${humidorCount()}</span>`:"The Humidor"} <span class="meta">${humidorUsed()}/${humidorCap()} buds</span></h3>
      <div class="bar brass"><i style="width:${Math.min(100,humidorUsed()/humidorCap()*100)}%"></i></div>
      <p class="tiny muted">Cedar-lined, brass fittings, a little mana hygrometer. Dried buds land here straight off the racks, and their freshness is locked. Jar them when an order needs them.</p>
      ${hum.length?`<div class="tscroll"><table><tr><th>Strain</th><th>Rarity</th><th>Buds</th><th>Fresh</th><th>Per bud</th><th></th></tr>${hum.map(l=>`<tr><td>${lotName(l)}</td><td>${rarTag(rarityOf(ST(l.strain)))}</td><td>${l.buds}</td><td>${freshTxt(l)}</td><td>${cr(budPrice(l.strain,l.muts)*l.fresh/100)}</td><td><button class="btn sm ghost" data-act="discard" data-where="humidor" data-id="${l.id}">Discard</button></td></tr>`).join("")}</table></div>`:`<div class="empty">Nothing dried yet. Harvest, load the racks, End Day.</div>`}
@@ -1579,6 +1587,7 @@ VIEWS.hallmark=()=>{
    ${Object.entries(JARS).map(([k,J])=>`<tr><td><b>${J.label}</b> <span class="tiny muted">${J.buds} buds</span></td>${Object.keys(JAR_PACKS).map(pk=>`<td><button class="btn sm ${pk==="single"?"ghost":""}" data-act="buyjar" data-size="${k}" data-pk="${pk}">${cr(jarPackPrice(k,pk))}</button></td>`).join("")}</tr>`).join("")}</table></div>
    <hr class="rule"><h4>Equipment</h4>
    <div class="row"><button class="btn brass" data-act="buyrack">Mana drying rack — ${cr(r2(cfg().rackPrice*(1-d/100)))}</button><span class="small muted">Holds ${rackCap()} buds. You have ${rackCount()}.</span></div>
+   <div class="row" style="margin-top:6px"><button class="btn brass" data-act="buyhumidor">Humidor — ${cr(r2(cfg().humidorPrice*(1-d/100)))}</button><span class="small muted">Cedar-lined, ${cfg().humidorCap+eff("humidorSpace")} buds each. You have ${humidorCount()} (${humidorCap()} buds).</span></div>
    <p class="tiny muted" style="margin-top:10px">Pen parts, cartridge shells, mana cores and flavor bottles join the catalogue in the next update.</p></div>
    <div class="panel"><h3>Parts bins <span class="meta">${binsUsed()}/${binCap()}</span></h3>
     <table>${Object.entries(JARS).map(([k,J])=>`<tr><td>${J.label}</td><td><b>${S.bins[k]||0}</b></td></tr>`).join("")}</table>
@@ -1859,7 +1868,7 @@ function snapshotMD(){
   const sum=list=>{const by={};for(const l of list){const k=ST(l.strain).name+(Object.keys(l.muts||{}).length?` (${mutPlain(l.muts)})`:"");by[k]=(by[k]||0)+l.buds}return Object.entries(by).map(([k,v])=>`${v} ${k}`).join(", ")};
   P(`- Harvest tanks (wet): ${sum(S.tank)||"empty"}`);
   S.racks.forEach((r,i)=>P(`- Drying rack ${i+1}: ${r.length?r.map(l=>`${l.buds} ${ST(l.strain).name} (${plural(l.daysLeft,"day")} left)`).join(", "):"empty"}`));
-  P(`- Humidor (${humidorUsed()}/${humidorCap()}): ${S.humidor.length?S.humidor.map(l=>`${l.buds} ${ST(l.strain).name}${Object.keys(l.muts||{}).length?` (${mutPlain(l.muts)})`:""}${l.fresh<100?` at ${l.fresh}%`:""}`).join(", "):"empty"}`);
+  P(`- ${humidorCount()>1?humidorCount()+" Humidors":"Humidor"} (${humidorUsed()}/${humidorCap()}): ${S.humidor.length?S.humidor.map(l=>`${l.buds} ${ST(l.strain).name}${Object.keys(l.muts||{}).length?` (${mutPlain(l.muts)})`:""}${l.fresh<100?` at ${l.fresh}%`:""}`).join(", "):"empty"}`);
   if(S.loose.length)P(`- Loose, losing freshness: ${S.loose.map(l=>`${l.buds} ${ST(l.strain).name} at ${l.fresh}%`).join(", ")}`);
   P(`- Parts bins: ${Object.entries(JARS).map(([k,J])=>`${S.bins[k]||0} ${J.label.toLowerCase()}s`).join(", ")}${S.deliveries.length?`; on the way: ${S.deliveries.map(d=>`${d.label} (${fmtShort(d.arrive)})`).join(", ")}`:""}`);
   P("");P(`## Nodes`);
@@ -2027,7 +2036,7 @@ VIEWS.settings=()=>{
     <p class="small muted">Numbers from the docs are the defaults. Ones marked * aren't in the docs; they're picked so the tool runs — change them freely.</p>
     <h4>Business</h4><div class="row">${num("orderCap","Order cap")}${num("registration","Base dues / month")}${num("duesPerLevel","+ dues per Rep Level")}${num("referral","Referral %")}${num("urgentPct","Urgent %")}${num("urgentChance","Urgent chance %")}${num("levyPct","Trade Levy %")}${num("permit","Interplanar permit / yr")}${num("exportPermit","Export permit / yr")}${num("upkeep","Boat upkeep / month")}${num("ppPct","Perk Points % of sales")}${num("packBase","First pack (PP)")}${num("packStep","+ PP per pack bought")}</div>
     <h4 style="margin-top:8px">Sea &amp; Glint</h4><div class="row">${num("tankCap","Harvest tanks")}${num("discoveryPct","New strain chance %")}${num("mutWildPct","Wild mutation %")}${num("maxHull","Max Hull")}${num("hullRepair","Daily repair")}${num("repairCost","Repair Cr/point")}${num("salvageTow","Salvage tow")}</div>
-    <h4 style="margin-top:8px">Workshop</h4><div class="row">${num("rackCap","Buds per rack")}${num("startRacks","Starting racks")}${num("rackPrice","Rack price")}${num("humidorCap","Humidor")}${num("binCap","Parts bins")}${num("dryMana","Drying mana / rack / night",.1)}${num("sealMana","Seal mana / jar",.05)}${num("freshGrace","Fresh days (loose)")}${num("freshLoss","Freshness loss %/day")}${num("deliverMin","Delivery min days")}${num("deliverMax","Delivery max days")}</div>
+    <h4 style="margin-top:8px">Workshop</h4><div class="row">${num("rackCap","Buds per rack")}${num("startRacks","Starting racks")}${num("rackPrice","Rack price")}${num("humidorCap","Buds per Humidor")}${num("humidorPrice","Humidor price")}${num("binCap","Parts bins")}${num("dryMana","Drying mana / rack / night",.1)}${num("sealMana","Seal mana / jar",.05)}${num("freshGrace","Fresh days (loose)")}${num("freshLoss","Freshness loss %/day")}${num("deliverMin","Delivery min days")}${num("deliverMax","Delivery max days")}</div>
     <h4 style="margin-top:8px">Lives</h4><div class="row">${num("livesCap","Feather cap")}${num("lifeCost","Feather price")}</div>
     <p class="tiny muted" style="margin-top:8px">* The 10 small jars, 10 jars and 2 extra large jars Finn opens with are a placeholder for the doc's "opening stock".</p>
    </div></div></div>`;
@@ -2048,7 +2057,7 @@ document.addEventListener("click",e=>{
    case"sail":sail(id);break; case"harvest":harvest();break; case"home":returnHome();break;
    case"loadracks":loadRacksNow();break; case"dumptank":dumpTank(id);break;
    case"tohumidor":looseToHumidor(id);break; case"discard":discardLot(t.dataset.where,id);break;
-   case"buyjar":orderJars(t.dataset.size,t.dataset.pk);break; case"buyrack":orderRack();break;
+   case"buyjar":orderJars(t.dataset.size,t.dataset.pk);break; case"buyrack":orderRack();break; case"buyhumidor":orderHumidor();break;
    case"accept":accept(o);break; case"decline":decline(o);break; case"abandon":abandon(o);break;
    case"jar":{const sel=document.querySelector(`select[data-src="${o}"][data-i="${i}"]`);jarItem(o,i,sel?sel.value:null);break}
    case"unjar":unjar(o,i);break;
