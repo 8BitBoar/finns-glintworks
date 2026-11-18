@@ -417,7 +417,7 @@ const DEFAULT_CONFIG={
  levyPct:5, royaltyPct:10, permit:100, exportPermit:150, upkeep:50,
  maxHull:100, hullRepair:20, repairCost:2, salvageTow:500, salvageDays:2, respawnHull:50,
  tankCap:100, rackCap:50, startRacks:2, rackPrice:25, humidorCap:200, humidorPrice:150, binCap:200,
- dryMana:1, sealMana:.1, freshGrace:3, freshLoss:5,
+ dryMana:1, homeTrip:20, rackLoad:5, sealMana:.1, freshGrace:3, freshLoss:5,
  discoveryPct:5, mutWildPct:2, mutCrossPct:5,
  ppPct:10, packBase:25, packStep:5,
  deliverMin:2, deliverMax:4,
@@ -728,9 +728,9 @@ function hullHit(parts,why){ // parts: list of damage numbers, each a separate h
 function sink(why){
   if(S.lives>0){
     S.lives--;S.location="home";S.pos=null;S.hull=Math.min(maxHull(),cfg().respawnHull);
-    const ld=loadRacks();plantsToPool();unloadChests();
+    plantsToPool();unloadChests();
     addLog(`The Lucky Landshark went down (${why}). One phoenix feather spent — Finn and the boat respawn at the dock with Hull ${S.hull}, and the harvest tanks and chest hold came back with her.`);
-    ev("sink",{why,life:true,loaded:ld});toast("The boat sank! A phoenix feather was spent — you respawned at the dock with the tanks intact.");
+    ev("sink",{why,life:true,wet:tankUsed()});toast("The boat sank! A phoenix feather was spent — you respawned at the dock with the tanks intact.");
   }else{
     const lost=tankUsed(),lostCh=S.chestHold.length;S.tank=[];S.tankPlants=[];S.chestHold=[];S.location="home";S.pos=null;
     const tow=cfg().salvageTow,paid=r2(Math.min(tow,Math.max(0,S.credits)));
@@ -855,7 +855,7 @@ function arrive(n){
 }
 function returnHome(){
   if(atHome())return;
-  act(30,()=>{S.location="home";S.pos=null;S.lastPlant=null;const ld=loadRacks();ld.plants=plantsToPool();ld.chests=unloadChests();ev("home",ld)},"Returned home and loaded the drying racks"+(S.chestHold.length?` and unloaded ${plural(S.chestHold.length,"chest")}`:""));
+  act(cfg().homeTrip,()=>{S.location="home";S.pos=null;S.lastPlant=null;const ld={wet:tankUsed()};ld.plants=plantsToPool();ld.chests=unloadChests();ev("home",ld)},"Returned home"+(S.chestHold.length?` and unloaded ${plural(S.chestHold.length,"chest")}`:"")+(tankUsed()?` — ${plural(tankUsed(),"wet bud")} wait in the tanks for the drying racks`:""));
 }
 
 /* ---------- strain rolls ---------- */
@@ -982,20 +982,31 @@ function dryDays(lot){
   if(S.est[lot.strain]&&S.est[lot.strain].done)d-=eff("tidewright");
   return Math.max(1,d);
 }
-function loadRacks(){ // wet buds from the tanks onto any rack space; what doesn't fit waits in the tanks
+const rackRoom=()=>{syncRacks();let t=0;for(let i=0;i<rackCount();i++)t+=Math.max(0,rackCap()-rackUsed(S.racks[i]));return t};
+function loadRacks(ids,quiet){ // wet buds from the tanks onto rack space (all lots, or the chosen ones); what doesn't fit waits in the tanks
   syncRacks();
-  const cap=rackCap(),n=rackCount();let loaded=0;
-  for(const lot of S.tank.slice()){
+  const cap=rackCap(),n=rackCount();let loaded=0,lots=0;
+  for(const lot of S.tank.slice()){if(ids&&!ids.includes(lot.id))continue;const b0=lot.buds;
     for(let i=0;i<n&&lot.buds>0;i++){const r=S.racks[i],room=cap-rackUsed(r);if(room<=0)continue;
       const k=Math.min(room,lot.buds);r.push({...lot,id:nid("d"),buds:k,daysLeft:dryDays(lot)});lot.buds-=k;loaded+=k}
+    if(lot.buds<b0)lots++;
   }
   S.tank=S.tank.filter(l=>l.buds>0);
   const left=tankUsed();
+  if(quiet)return {loaded,left,lots};
   if(loaded)addLog(`Loaded ${plural(loaded,"wet bud")} onto the drying racks.${left?` ${plural(left,"bud")} wait in the tanks for rack space.`:""}`);
   else if(left)addLog(`The drying racks are full — ${plural(left,"wet bud")} wait in the harvest tanks.`);
-  return {loaded,left};
+  return {loaded,left,lots};
 }
-function loadRacksNow(){if(!atHome()||!S.tank.length)return;act(0,()=>{loadRacks()},null)}
+function loadRacksNow(id){ // one lot (id) or everything that fits, rackLoad minutes per lot
+  if(!atHome()||!S.tank.length)return;
+  const room=rackRoom();if(room<=0){toast("The drying racks are full.");return}
+  // work out which lots will (at least partly) fit, in order, to price the time
+  let r=room,lots=0,buds=0;for(const l of S.tank){if(id&&l.id!==id)continue;if(r<=0)break;const k=Math.min(r,l.buds);r-=k;buds+=k;lots++}
+  const one=id&&S.tank.find(l=>l.id===id);
+  act(cfg().rackLoad*lots,()=>{const ld=loadRacks(id?[id]:null,true);ev("rackload",{loaded:ld.loaded,left:ld.left,what:one?lotName(one).replace(/<[^>]+>/g,""):null})},
+    one?`Loaded ${plural(buds,"bud")} of ${ST(one.strain).name} onto the drying racks${buds<one.buds?` (${one.buds-buds} didn't fit)`:""}`:`Loaded ${plural(buds,"wet bud")} onto the drying racks${tankUsed()-buds>0?` — ${tankUsed()-buds} still wait in the tanks`:""}`);
+}
 function storeDried(lot){ // fresh from the racks: into the Humidor if there's room, otherwise loose on the counter
   const base={strain:lot.strain,muts:lot.muts||{},fresh:100};
   const room=Math.max(0,humidorCap()-humidorUsed()),inH=Math.min(room,lot.buds),out=lot.buds-inH;
@@ -1157,8 +1168,8 @@ function harvestPool(id){
   act(15,()=>{
     S.pool=S.pool.filter(x=>x!==p);
     S.tank.push({id:nid("w"),strain:p.strain,buds:p.buds,muts:p.muts||{},day:S.clock.day});
-    gainXP(1,"harvested a plant");loadRacks();ev("plant",{name:s.name,buds:p.buds,kept:p.buds,muts:mutPlain(p.muts),pool:true});
-  },`Harvested the ${s.name} plant from the tide pool: ${plural(p.buds,"wet bud")}`);
+    gainXP(1,"harvested a plant");ev("plant",{name:s.name,buds:p.buds,kept:p.buds,muts:mutPlain(p.muts),pool:true});
+  },`Harvested the ${s.name} plant from the tide pool: ${plural(p.buds,"wet bud")}, waiting to go on the drying racks`);
 }
 function releasePlant(id){
   const p=S.pool.find(x=>x.id===id)||S.tankPlants.find(x=>x.id===id);if(!p)return;
@@ -1667,6 +1678,12 @@ function register(key){
   f.registered=true;f.autoRenew=true;addLog(`Registered with ${FAC[key].name}.`);commit();
 }
 const orderChance=key=>10+5*S.factions[key].level+eff("orderChance");
+function orderOdds(keys){ // keys: faction keys that roll tonight → chance of at least one offer, expected offers
+  keys=keys||FACTIONS.filter(f=>S.factions[f.key].registered).map(f=>f.key);
+  let none=1,exp=0;for(const k of keys){const ch=orderChance(k);exp+=ch/100;none*=ch>=100?0:1-ch/100}
+  if(S.gossip&&keys.length)none=0;
+  return {any:1-none,exp,week:1-Math.pow(none,7),none,n:keys.length};
+}
 const packPrice=()=>cfg().packBase+cfg().packStep*(S.packsBought||0);
 function buyPack(){
   const c=packPrice();
@@ -1739,7 +1756,7 @@ function endDay(){
 }
 function overnight(){
   const notes=[];
-  if(!atHome()){S.location="home";S.pos=null;loadRacks();plantsToPool();const c=unloadChests();notes.push("Finn sailed home and loaded the racks"+(c?` and unloaded ${plural(c,"chest")}`:"")+".")}
+  if(!atHome()){S.location="home";S.pos=null;plantsToPool();const c=unloadChests();notes.push("Finn sailed home"+(c?` and unloaded ${plural(c,"chest")}`:"")+(tankUsed()?` — ${plural(tankUsed(),"wet bud")} wait in the tanks for the drying racks`:"")+".")}
   S.lastPlant=null;
   const oldMonth=monthOf(S.clock.day);
   notes.push(...nightlyDrying());
@@ -2051,7 +2068,7 @@ VIEWS.sea=()=>{
       ${eff("jorCoil")?`<p class="tiny muted">Uncle Jor's Coil: ${jorReady()?"ready":"used — ready again "+fmtShort(S.jorUsed+7)}.</p>`:""}
       <div class="row">
        <button class="btn" data-act="harvest" ${here&&here.left>0&&!full?"":"disabled"}>Harvest a plant (${fmtDur(here?plantTime(here):15)}${here&&plantDmg(here)?`, −${plantDmg(here)} Hull`:""})</button>
-       <button class="btn ghost" data-act="home" ${atHome()?"disabled":""}>Return home &amp; load racks (30 min)</button>
+       <button class="btn ghost" data-act="home" ${atHome()?"disabled":""}>Return home (${fmtDur(cfg().homeTrip)})</button>
       </div>
       ${S.lastPlant&&!S.lastPlant.kept&&!atHome()?`<div class="slot" style="margin-top:8px"><div class="row between"><span class="small">Just harvested: ${strainTxt(S.lastPlant.strain)} ${mutTxt(S.lastPlant.muts)} · ${S.lastPlant.buds} buds</span><button class="btn sm verd" data-act="keepwhole">Keep it whole for the tide pool</button></div><div class="tiny muted">${canParent(ST(S.lastPlant.strain))?"It can parent a cross.":"Not a parent until it's Established."} The pool has ${poolCap()-S.pool.length} free spot${poolCap()-S.pool.length===1?"":"s"}.</div></div>`:""}
       ${here&&here.chest?`<div class="slot chestslot" style="margin-top:8px"><div class="row between"><span class="small">${chestIcon(here.chest.size,22)} ${/^o/.test(here.chest.size)?"An":"A"} <b>${CHESTS[here.chest.size].label.toLowerCase()}</b> half-buried near the plants${here.chest.planar?` <span class="tag" title="Planar Seam: off-world sets are likelier">planar</span>`:""}.</span><button class="btn sm brass" data-act="hoist" ${chestHoldUsed()+CHESTS[here.chest.size].space>chestHoldCap()?"disabled":""}>Hoist it (10 min)</button></div><div class="tiny muted">Takes ${plural(CHESTS[here.chest.size].space,"space")} · chest hold ${chestHoldUsed()}/${chestHoldCap()}. If the node fades first, she hoists it on the way up when it fits.</div></div>`:""}
@@ -2106,8 +2123,13 @@ VIEWS.works=()=>{
    <div class="grid">
     <div class="panel"><h3>Drying racks <span class="meta">${n} rack${n>1?"s":""} × ${cap} buds</span></h3>
      <p class="tiny muted">Common 1 day · Uncommon 2 · Rare 3 · Mythic Rare and Apex 5. Each rack in use costs ${cr(cfg().dryMana)} Metered Mana a night${wxNow()==="Mana Tide"?" (half tonight — Mana Tide)":""}.</p>
-     ${S.tank.length&&atHome()?`<div class="row" style="margin-bottom:6px"><button class="btn sm" data-act="loadracks">Load ${plural(S.tank.reduce((a,l)=>a+l.buds,0),"wet bud")} from the tanks</button></div>`:""}
      ${racks}</div>
+    ${S.tank.length?`<div class="panel"><h3>Wet buds waiting <span class="meta">${tankUsed()} in the tanks · ${rackRoom()} rack space free</span></h3>
+     <p class="tiny muted">Pick what goes on the racks first — ${fmtDur(cfg().rackLoad)} per lot. Wet buds don't spoil in the tanks, but they take up tank space on the next trip out.</p>
+     <div class="tscroll"><table><tr><th>Strain</th><th>Rarity</th><th>Buds</th><th>Dries in</th><th></th></tr>${S.tank.map(l=>{const d=dryDays(l);return `<tr><td>${lotName(l)}</td><td>${rarTag(rarityOf(ST(l.strain)))}</td><td>${l.buds}</td><td class="nowrap">${plural(d,"day")}${l.seep?` <span class="tag" title="Mana Seep">seep</span>`:""}</td>
+       <td class="nowrap"><button class="btn sm" data-act="loadracks" data-id="${l.id}" ${atHome()&&rackRoom()>0?"":"disabled"}>${rackRoom()>=l.buds?"Load":`Load ${rackRoom()}`} (${fmtDur(cfg().rackLoad)})</button></td></tr>`}).join("")}</table></div>
+     ${S.tank.length>1?`<div class="row" style="margin-top:8px"><button class="btn sm ghost" data-act="loadracks" ${atHome()&&rackRoom()>0?"":"disabled"}>Load everything that fits</button></div>`:""}
+     ${atHome()?"":`<p class="tiny muted" style="margin-top:6px">Loading happens at the lighthouse.</p>`}</div>`:""}
     <div class="panel"><h3>Parts bins <span class="meta">${binsUsed()}/${binCap()} items</span></h3>${binTable()}
      ${S.deliveries.length?`<h4 style="margin-top:10px">On the way from Hallmark's</h4><table>${S.deliveries.map(d=>`<tr><td class="small">${esc(d.label)}</td><td class="small muted">arrives ${fmtShort(d.arrive)}</td></tr>`).join("")}</table>`:""}
      <div class="row" style="margin-top:8px"><a href="#" class="small" data-tab="hallmark">Order from Hallmark's →</a></div></div>
@@ -2263,12 +2285,25 @@ VIEWS.orders=()=>`${dbBanner()}
   <div class="row between" style="margin-bottom:10px"><h2>Active orders <span class="muted small">${S.orders.length}/${orderCap()}</span></h2></div>
   ${S.orders.length?`<div class="cards">${S.orders.map(o=>orderCard(o,false)).join("")}</div>`:`<div class="panel empty">No active orders. Accept an offer below.</div>`}
   <h2 style="margin:22px 0 10px">Offers <span class="muted small">${S.offers.length}</span></h2>
+  <div class="tiny" style="margin:-4px 0 10px">${oddsPanel(true)} <a href="#" class="small" data-tab="factions">Odds by faction →</a></div>
   ${S.offers.length?`<div class="cards">${S.offers.map(o=>orderCard(o,true)).join("")}</div>`:`<div class="panel empty">No offers waiting. Registered factions roll for orders each time you End Day.</div>`}
   ${S.done.length?`<h2 style="margin:22px 0 10px">Delivered</h2><div class="panel tscroll"><table><tr><th>Date</th><th>Order</th><th>Faction</th><th>Total</th><th>Kept</th><th>RP</th></tr>
    ${S.done.slice(0,40).map(d=>`<tr><td>${fmtShort(d.day)}</td><td>${esc(d.title)} ${d.urgent?`<span class="tag ${d.missed?"no":"urgent"}">${d.missed?"late":"urgent"}</span>`:""}<div class="tiny muted">${esc((d.items||[]).join(" · "))}</div></td><td class="small">${esc(FAC[d.faction].name)}</td><td>${cr(d.total)}</td><td>${cr(d.net)}</td><td>${d.rp}</td></tr>`).join("")}</table></div>`:""}`;
 
 /* ---------- FACTIONS ---------- */
-VIEWS.factions=()=>`<p class="muted small">Dues are ${cr(cfg().registration)} + ${cr(cfg().duesPerLevel)} per Reputation Level each month, charged on the 1st; only registered factions roll for orders when you End Day (chance 10% + 5% per Reputation Level${eff("orderChance")?` + ${eff("orderChance")}% Word of Mouth`:""}). Each faction takes a ${cfg().referral}% referral cut. Reputation never drops if you stop paying.</p>
+function oddsPanel(compact){
+  const o=orderOdds(),reg=FACTIONS.filter(f=>S.factions[f.key].registered).map(f=>f.key),pct=x=>x>=.9995?"100%":x<.0005&&x>0?"<0.1%":`${(x*100).toFixed(x<.1?1:0)}%`;
+  if(compact)return `<p class="small">${o.n?`Tonight's chance of at least one new offer: <b>${pct(o.any)}</b> (about ${o.exp.toFixed(2)} offers a night from ${plural(o.n,"registered faction")}).`:"No factions registered — no offers will come."}</p>`;
+  const adds=FACTIONS.filter(f=>!reg.includes(f.key)).map(f=>[f,orderOdds([...reg,f.key]).any-o.any]);
+  return `<div class="panel" style="margin-bottom:12px"><h3>Order odds <span class="meta">${plural(o.n,"registered faction")}</span></h3>
+   ${o.n?`<div class="grid g3"><div class="statbox"><div class="muted small">At least one offer tonight</div><div class="n">${pct(o.any)}</div></div>
+     <div class="statbox"><div class="muted small">Offers per night, on average</div><div class="n">${o.exp.toFixed(2)}</div></div>
+     <div class="statbox"><div class="muted small">At least one this week</div><div class="n">${pct(o.week)}</div></div></div>
+     <p class="tiny muted" style="margin-top:8px">Each registered faction rolls on its own; the chance of none at all is ${reg.map(k=>`${100-Math.min(100,orderChance(k))}%`).join(" × ")} = ${pct(o.none)}.${S.gossip?" Uðr's gossip guarantees one tonight.":""} The week figure assumes nothing changes for 7 nights.</p>`
+     :`<div class="empty">No factions registered, so no offers will come. Register one below.</div>`}
+   ${adds.length&&o.any<.9995?`<p class="tiny" style="margin-top:6px">Registering would raise tonight's odds by: ${adds.map(([f,d])=>`${esc(f.name)} +${(d*100).toFixed(1)} pts`).join(" · ")}</p>`:""}</div>`;
+}
+VIEWS.factions=()=>`${oddsPanel()}<p class="muted small">Dues are ${cr(cfg().registration)} + ${cr(cfg().duesPerLevel)} per Reputation Level each month, charged on the 1st; only registered factions roll for orders when you End Day (chance 10% + 5% per Reputation Level${eff("orderChance")?` + ${eff("orderChance")}% Word of Mouth`:""}). Each faction takes a ${cfg().referral}% referral cut. Reputation never drops if you stop paying.</p>
  <div class="cards">${FACTIONS.map(f=>{const st=S.factions[f.key],need=rpToReach(st.level+1),ch=orderChance(f.key);
   return `<div class="panel"><h3>${esc(f.name)}</h3><div class="muted small">${esc(f.reps)}</div>
    <p class="tiny" style="margin:6px 0">${esc(f.leans)}</p>
@@ -2710,7 +2745,8 @@ function dayMD(dn){
     ...by("discover").map(e=>`New Codex entry: ${e.name} (${affName(e.colors)})`),
     ...by("coins").map(e=>`${e.why}: ${cr(e.amount)}`),...by("sister").map(e=>e.text),
     ...by("sink").map(e=>e.life?`The Lucky Landshark sank (${e.why}). A Phoenix Feather was spent; Finn and the boat respawned at the dock with the tanks intact`:`The Lucky Landshark sank (${e.why}) with no feathers left: ${e.lost} wet buds went to Rán, salvage tow ${cr(e.tow)}${e.owed>0?` (${cr(e.owed)} owed)`:""}, boat out for 2 days`),
-    ...by("repair").map(e=>`Repaired the hull +${e.pts} (${cr(e.cost)})`),...by("home").map(e=>`Returned home${e.loaded?` and loaded ${e.loaded} wet buds onto the racks`:""}${e.left?` (${e.left} wait in the tanks)`:""}`)]);
+    ...by("repair").map(e=>`Repaired the hull +${e.pts} (${cr(e.cost)})`),...by("home").map(e=>`Returned home${e.loaded?` and loaded ${e.loaded} wet buds onto the racks`:""}${e.left?` (${e.left} wait in the tanks)`:""}${e.wet?` with ${e.wet} wet buds in the tanks`:""}`),
+    ...by("rackload").map(e=>`Loaded ${e.loaded} wet buds${e.what?` of ${e.what}`:""} onto the drying racks${e.left?` (${e.left} still in the tanks)`:""}`)]);
   sec("Tide pool",[...by("keep").map(e=>`Kept a ${e.name} plant whole for the tide pool`),...by("cross").map(e=>`Crossed ${e.a} × ${e.b} → ${e.child}${e.recipe?` (${e.note})`:" (no recipe — a Colorless dead end)"}${e.muts?`, with ${e.muts}`:""}`),
     ...by("established").map(e=>`${e.name} became Established`),...by("spread").map(e=>`${e.name} spread to ${e.spread} in the wild`),...by("mutation").map(e=>e.tier===1?`Discovered a new mutation: ${e.name}`:`${e.name} rose to tier ${ROMAN[e.tier]}`)]);
   sec("Glintworks",[...by("dried").map(e=>`Dried overnight: ${e.text}`),...by("jar").map(e=>`Jarred and sealed: ${e.text}`),...by("extract").map(e=>e.text),...by("pen").map(e=>`Assembled a ${e.text}`),...by("penGone").map(e=>`A ${e.tier} pen owned by ${e.who} ${e.lost?"was lost":"wore out"}`),...by("hallmark").map(e=>`Ordered from Hallmark's: ${e.text}`),...by("parcel").map(e=>`Hallmark's parcel arrived: ${e.text}`)]);
@@ -2775,11 +2811,11 @@ VIEWS.settings=()=>{
     <p class="small muted">Numbers from the docs are the defaults. Ones marked * aren't in the docs; they're picked so the tool runs — change them freely.</p>
     <h4>Business</h4><div class="row">${num("orderCap","Order cap")}${num("registration","Base dues / month")}${num("duesPerLevel","+ dues per Rep Level")}${num("referral","Referral %")}${num("urgentPct","Urgent %")}${num("urgentChance","Urgent chance %")}${num("levyPct","Trade Levy %")}${num("permit","Interplanar permit / yr")}${num("exportPermit","Export permit / yr")}${num("upkeep","Boat upkeep / month")}${num("ppPct","Perk Points % of sales")}${num("packBase","First pack (PP)")}${num("packStep","+ PP per pack bought")}</div>
     <h4 style="margin-top:8px">Sea &amp; Glint</h4><div class="row">${num("tankCap","Harvest tanks")}${num("discoveryPct","New strain chance %")}${num("mutWildPct","Wild mutation %")}${num("maxHull","Max Hull")}${num("hullRepair","Daily repair")}${num("repairCost","Repair Cr/point")}${num("salvageTow","Salvage tow")}</div>
-    <h4 style="margin-top:8px">Workshop</h4><div class="row">${num("rackCap","Buds per rack")}${num("startRacks","Starting racks")}${num("rackPrice","Rack price")}${num("humidorCap","Buds per Humidor")}${num("humidorPrice","Humidor price")}${num("binCap","Parts bins")}${num("dryMana","Drying mana / rack / night",.1)}${num("sealMana","Seal mana / jar",.05)}${num("freshGrace","Fresh days (loose)")}${num("freshLoss","Freshness loss %/day")}${num("deliverMin","Delivery min days")}${num("deliverMax","Delivery max days")}</div>
+    <h4 style="margin-top:8px">Workshop</h4><div class="row">${num("rackCap","Buds per rack")}${num("startRacks","Starting racks")}${num("rackPrice","Rack price")}${num("humidorCap","Buds per Humidor")}${num("humidorPrice","Humidor price")}${num("binCap","Parts bins")}${num("dryMana","Drying mana / rack / night",.1)}${num("homeTrip","Trip home (min) *")}${num("rackLoad","Rack loading (min / lot) *")}${num("sealMana","Seal mana / jar",.05)}${num("freshGrace","Fresh days (loose)")}${num("freshLoss","Freshness loss %/day")}${num("deliverMin","Delivery min days")}${num("deliverMax","Delivery max days")}</div>
     <h4 style="margin-top:8px">Tide pool &amp; pens</h4><div class="row">${num("poolCap","Tide pool plants")}${num("crossPct","Progress per cross %")}${num("mutCrossPct","Cross mutation %")}${num("jeffPct","Jeff naps here %")}${num("extractMana","Extraction mana",.1)}${num("addonPct","Pen add-on chance %")}${num("refillUnlock","Pens before refills")}${num("refillPct","Refill % per pen/day",.5)}${num("refillCap","Refills per day")}${num("penLoss","Pen lost %/day",.1)}${num("replacePct","Replacement %")}${num("prefPct","Preference bonus %")}</div>
     <h4 style="margin-top:8px">Collectables</h4><div class="row">${num("chestPct","Chest chance %")}${num("chestHold","Chest hold space")}${num("royaltyPct","Salvage Royalty %")}${num("setBonusPct","Full-set bonus %")}${num("surveyLimit","Survey sales / month")}${num("surveyPct","Standing bonus % / Level")}${num("auctionOpen","Opening bid %")}${num("auctionBid","Daily bid chance %")}${num("auctionFee","Salon fee %")}${num("auctionItemDays","Auction days (piece)")}${num("auctionSetDays","Auction days (set)")}${num("offworldPlanar","Off-world weight, Planar Seam *",.25)}${num("offworldNormal","Off-world weight, elsewhere *",.05)}</div>
     <h4 style="margin-top:8px">Lives</h4><div class="row">${num("livesCap","Feather cap")}${num("lifeCost","Feather price")}</div>
-    <p class="tiny muted" style="margin-top:8px">* Opening stock is a placeholder for the doc's "a crate of mana cores, jars, flavor bottles": 50 mana cores, 20 cartridge shells, 10 brass bodies, 10 plain mouthpieces, 10 small jars, 10 jars, 2 extra large jars, and a standard bottle each of Peach and Mango. Part prices, shells (0.5 Cr), Jeff's 40% and the Peach + Mango drops for ${HOUSE_BLEND} are placeholders too. For chests: each set is equally likely, except the off-world sets (Shi'ar, Asgardian), which weigh 4× in Planar Seam chests and ¼ elsewhere; display picking your best copies is a placeholder as well.</p>
+    <p class="tiny muted" style="margin-top:8px">* Opening stock is a placeholder for the doc's "a crate of mana cores, jars, flavor bottles": 50 mana cores, 20 cartridge shells, 10 brass bodies, 10 plain mouthpieces, 10 small jars, 10 jars, 2 extra large jars, and a standard bottle each of Peach and Mango. Part prices, shells (0.5 Cr), Jeff's 40% and the Peach + Mango drops for ${HOUSE_BLEND} are placeholders too. The doc's 30-minute "return home, load the racks" is split into a 20-minute trip plus 5 minutes per lot you load. For chests: each set is equally likely, except the off-world sets (Shi'ar, Asgardian), which weigh 4× in Planar Seam chests and ¼ elsewhere; display picking your best copies is a placeholder as well.</p>
    </div></div></div>`;
 };
 
@@ -2802,7 +2838,7 @@ document.addEventListener("click",e=>{
    case"survey":sellSurvey(t.dataset.kind,t.dataset.k);break; case"consign":consign(t.dataset.kind,t.dataset.k);break;
    case"repair":repairHull(t.dataset.pts?+t.dataset.pts:null);break;
    case"sail":sail(id);break; case"harvest":harvest();break; case"home":returnHome();break;
-   case"loadracks":loadRacksNow();break; case"dumptank":dumpTank(id);break;
+   case"loadracks":loadRacksNow(id||null);break; case"dumptank":dumpTank(id);break;
    case"tohumidor":looseToHumidor(id);break; case"discard":discardLot(t.dataset.where,id);break;
    case"keepwhole":keepWhole();break; case"poolharvest":harvestPool(id);break; case"release":releasePlant(id);break;
    case"cross":{const pk=UI.crossPick||[];if(pk.length===2){UI.crossPick=[];cross(pk[0],pk[1])}break}
