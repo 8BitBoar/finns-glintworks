@@ -8,7 +8,7 @@ The page is public (GitHub Pages). Everything that's yours — strains, cards, c
 
 1. **Create two repos** on GitHub under `8BitBoar`:
    - `finns-glintworks` — **public**. Upload `index.html` and this README.
-   - `finns-glintworks-data` — **private**. Upload `strains.json`, `cards.json`, `factions.json`, the `card-icons/` folder and its README. (`save.json` is created by the page on first connect.)
+   - `finns-glintworks-data` — **private**. Upload `strains.json`, `cards.json`, `factions.json`, `collectables.json`, the `card-icons/` folder and its README. (`save.json` is created by the page on first connect.)
 2. **Turn on Pages** for `finns-glintworks`: Settings → Pages → Deploy from a branch → `main` / root. The page will be at `https://8bitboar.github.io/finns-glintworks/`.
 3. **Make a fine-grained token** limited to `finns-glintworks-data` with **Contents: Read and write**. (You can't reuse the Finn's Facets token unless you add this repo to it.)
 4. Open the page → **Settings** → owner `8BitBoar`, repo `finns-glintworks-data`, branch `main`, paste the token → **Save & connect**.
@@ -22,16 +22,13 @@ The two tools keep separate saves, so both can be open in the same browser.
 3. **Glintworks** — dried buds land in the Humidor (200 buds, freshness locked; buy more Humidors at Hallmark's for 150 Cr each). If it's full they wait loose: full freshness for 3 days, then −5% a day.
 4. **Tide Pool** — at sea, tap **Keep it whole** after harvesting a plant and it settles in the tide pool (10 plants) when you dock. Cross two wild or Established plants (30 min): a known recipe adds 20% toward Established; a pair with no recipe gives a Colorless dead end. Once Established, a strain sells, spreads into the wild, and its crosses give plants you can harvest. Crosses are how mutations are discovered.
 5. **Orders** — jars (small 5 / jar 15 / extra large 40 buds), cartridges (3 buds + a shell + an optional flavor drop), pens (fill the included cartridge, then assemble body, mouthpiece, band and a mana core) and refills. Pack, send. Restock at **Hallmark's** (arrives in 2–4 days); a new pen-part design costs 50 Cr to tool once.
-6. **End Day** — racks dry, pens wear out and refill requests roll, parcels arrive, factions roll for orders, nodes refresh. The 1st is bills day: salary, dues, boat upkeep and Emma's 20%. Both permits renew on the opening-day anniversary.
+6. **Curio Room** — with the **Winch** card, a node can hold a chest (10%, more on Wreck, Coin Scatter and Planar Seam nodes), found on its first harvest. Hoist it (10 min); it rides home in the chest hold (6 space) and waits in the Curio Room. Opening one plays the unboxing, pays its loose coins, and hands you Collectables to catalog (5 min each). Complete a set and arrange it on display for its bonus. Spares sell to the Survey (instant, monthly limit, Standing bonus) or go to auction at the Salon (bids roll each night). The 10% Salvage Royalty comes out of every sale.
+7. **End Day** — racks dry, auctions take bids, pens wear out and refill requests roll, parcels arrive, factions roll for orders, nodes refresh. The 1st is bills day: salary, dues, boat upkeep and Emma's 20%. Both permits renew on the opening-day anniversary.
 
 ## Perk Cards
 
 - 10% of every sale (after the faction's cut) becomes Perk Points. Packs cost 25 PP, then +5 for each one bought. Each Level also gives a free pack; a new game starts with a 3-card starter pack.
 - Cards live in `cards.json` in the data repo, icons in its `card-icons/` folder.
-
-## Coming next
-
-- **Round 3:** chests and Collectables, the Curio Room, the Survey and the Salon, and the rest of the card list.
 
 ## Credits
 
