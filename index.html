@@ -417,7 +417,7 @@ const DEFAULT_CONFIG={
  levyPct:5, royaltyPct:10, permit:100, exportPermit:150, upkeep:50,
  maxHull:100, hullRepair:20, repairCost:2, salvageTow:500, salvageDays:2, respawnHull:50,
  tankCap:100, rackCap:50, startRacks:2, rackPrice:25, humidorCap:200, humidorPrice:150, binCap:200,
- dryMana:1, homeTrip:20, rackLoad:5, sealMana:.1, freshGrace:3, freshLoss:5,
+ colorContains:true, dryMana:1, homeTrip:20, rackLoad:5, sealMana:.1, freshGrace:3, freshLoss:5,
  discoveryPct:5, mutWildPct:2, mutCrossPct:5,
  ppPct:10, packBase:25, packStep:5,
  deliverMin:2, deliverMax:4,
@@ -1392,14 +1392,16 @@ function matches(req,id){
   if(!req)return true;                       // "any strain"
   if(s.colorless)return false;
   if(req.type==="strain")return id===req.strain;
-  if(req.type==="aff")return s.colors.length===req.colors.length&&req.colors.every(c=>s.colors.includes(c));
+  if(req.type==="aff")return req.colors.every(c=>s.colors.includes(c))&&(cfg().colorContains||s.colors.length===req.colors.length); // MTG-style: a Green-Blue strain counts as Green
   if(req.type==="kw")return s.keywords.some(k=>k.k===req.k&&k.x>=req.min);
   return false;
 }
 function reqText(req,plain){
   if(!req)return plain?"any strain":"<b>any strain</b>";
   if(req.type==="strain"){const s=ST(req.strain);return plain?(s?s.name:req.strain):strainTxt(req.strain,{kw:true})}
-  if(req.type==="aff")return plain?`any ${affName(req.colors)} strain`:`${pips(req.colors)} any <b>${affName(req.colors)}</b> strain`;
+  if(req.type==="aff"){const nm=!cfg().colorContains||req.colors.length===1?affName(req.colors):req.colors.map(c=>COLORS[c].name).join(" and "),
+    t=cfg().colorContains?"any strain with "+nm+" in it":"any "+nm+" strain";
+    return plain?(cfg().colorContains&&req.colors.length===1?`any ${nm} strain`:t):`${pips(req.colors)} ${cfg().colorContains&&req.colors.length===1?`any <b>${nm}</b> strain`:t.replace(nm,`<b>${nm}</b>`)}${cfg().colorContains?` <span class="tiny muted" title="Like MTG, a strain counts as every color in its Affinity">(multicolor counts)</span>`:""}`}
   if(req.type==="kw")return plain?`any strain with ${req.k} ${req.min} or higher`:`any strain with <b>${esc(req.k)} ${req.min}</b> or higher`;
   return "";
 }
@@ -2811,6 +2813,7 @@ VIEWS.settings=()=>{
     <p class="small muted">Numbers from the docs are the defaults. Ones marked * aren't in the docs; they're picked so the tool runs — change them freely.</p>
     <h4>Business</h4><div class="row">${num("orderCap","Order cap")}${num("registration","Base dues / month")}${num("duesPerLevel","+ dues per Rep Level")}${num("referral","Referral %")}${num("urgentPct","Urgent %")}${num("urgentChance","Urgent chance %")}${num("levyPct","Trade Levy %")}${num("permit","Interplanar permit / yr")}${num("exportPermit","Export permit / yr")}${num("upkeep","Boat upkeep / month")}${num("ppPct","Perk Points % of sales")}${num("packBase","First pack (PP)")}${num("packStep","+ PP per pack bought")}</div>
     <h4 style="margin-top:8px">Sea &amp; Glint</h4><div class="row">${num("tankCap","Harvest tanks")}${num("discoveryPct","New strain chance %")}${num("mutWildPct","Wild mutation %")}${num("maxHull","Max Hull")}${num("hullRepair","Daily repair")}${num("repairCost","Repair Cr/point")}${num("salvageTow","Salvage tow")}</div>
+    <h4 style="margin-top:8px">Orders</h4><label class="small row" style="gap:6px;align-items:center"><input type="checkbox" data-cfg="colorContains" ${C.colorContains?"checked":""}> Color requirements work like MTG: a strain counts as every color in its Affinity, so a Green-Blue strain fills "any Green strain" and "any Blue strain"</label>
     <h4 style="margin-top:8px">Workshop</h4><div class="row">${num("rackCap","Buds per rack")}${num("startRacks","Starting racks")}${num("rackPrice","Rack price")}${num("humidorCap","Buds per Humidor")}${num("humidorPrice","Humidor price")}${num("binCap","Parts bins")}${num("dryMana","Drying mana / rack / night",.1)}${num("homeTrip","Trip home (min) *")}${num("rackLoad","Rack loading (min / lot) *")}${num("sealMana","Seal mana / jar",.05)}${num("freshGrace","Fresh days (loose)")}${num("freshLoss","Freshness loss %/day")}${num("deliverMin","Delivery min days")}${num("deliverMax","Delivery max days")}</div>
     <h4 style="margin-top:8px">Tide pool &amp; pens</h4><div class="row">${num("poolCap","Tide pool plants")}${num("crossPct","Progress per cross %")}${num("mutCrossPct","Cross mutation %")}${num("jeffPct","Jeff naps here %")}${num("extractMana","Extraction mana",.1)}${num("addonPct","Pen add-on chance %")}${num("refillUnlock","Pens before refills")}${num("refillPct","Refill % per pen/day",.5)}${num("refillCap","Refills per day")}${num("penLoss","Pen lost %/day",.1)}${num("replacePct","Replacement %")}${num("prefPct","Preference bonus %")}</div>
     <h4 style="margin-top:8px">Collectables</h4><div class="row">${num("chestPct","Chest chance %")}${num("chestHold","Chest hold space")}${num("royaltyPct","Salvage Royalty %")}${num("setBonusPct","Full-set bonus %")}${num("surveyLimit","Survey sales / month")}${num("surveyPct","Standing bonus % / Level")}${num("auctionOpen","Opening bid %")}${num("auctionBid","Daily bid chance %")}${num("auctionFee","Salon fee %")}${num("auctionItemDays","Auction days (piece)")}${num("auctionSetDays","Auction days (set)")}${num("offworldPlanar","Off-world weight, Planar Seam *",.25)}${num("offworldNormal","Off-world weight, elsewhere *",.05)}</div>
@@ -2882,7 +2885,7 @@ document.addEventListener("click",e=>{
 document.addEventListener("input",e=>{if(e.target.id==="cxQ"){UI.cxQ=e.target.value;clearTimeout(UI.qT);UI.qT=setTimeout(()=>{render();const el=$("#cxQ");if(el){el.focus();el.setSelectionRange(el.value.length,el.value.length)}},250)}});
 document.addEventListener("change",e=>{
   const t=e.target;
-  if(t.dataset.cfg){S.config[t.dataset.cfg]=+t.value;commit();return}
+  if(t.dataset.cfg){if(t.type==="checkbox"){S.config[t.dataset.cfg]=t.checked;commit();render()}else{S.config[t.dataset.cfg]=+t.value;commit()}return}
   if(t.dataset.equip){equipCard(t.dataset.equip,+t.value);return}
   if(t.dataset.pick){let pk=(UI.crossPick||[]).filter(x=>S.pool.some(p=>p.id===x));if(t.checked){pk.push(t.dataset.pick);if(pk.length>2)pk=pk.slice(-2)}else pk=pk.filter(x=>x!==t.dataset.pick);UI.crossPick=pk;render();return}
   if(t.dataset.patron){const c=S.cards[t.dataset.patron];if(c){c.faction=t.value;addLog(`Patron's Favor now favors ${FAC[t.value].name}.`);commit()}return}
